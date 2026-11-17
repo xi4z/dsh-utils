@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Unattended approval gate",
+    "description": "Bounds subagent / scheduled / cron approval requests with an answer window that settles fail-closed."
+  }
+}

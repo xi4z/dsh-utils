@@ -1,7 +1,7 @@
 {
   "name": "dsh-utils",
-  "version": "0.1.0",
-  "description": "DeepSeek Harness utility bundle: two components — recursive SKILL.md discovery in nested skill folders, and an unattended approval gate that bounds approval requests and settles fail-closed",
+  "version": "0.2.0",
+  "description": "DeepSeek Harness utility bundle: three components — recursive SKILL.md discovery in nested skill folders, an unattended approval gate that bounds approval requests and settles fail-closed, and turn-end/approval/question notifications through a Gotify gateway",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -10,7 +10,11 @@
     "skills",
     "skill-discovery",
     "approval",
-    "unattended"
+    "unattended",
+    "notify",
+    "gotify",
+    "qq",
+    "multi-device"
   ],
   "license": "MIT",
   "author": "xi4z",
@@ -33,6 +37,13 @@
       "import": "./lib/approval-policy.js",
       "default": "./lib/approval-policy.js"
     },
+    "./approval-policy/locale/*.json": "./locale/approval-policy/*.json",
+    "./notify": {
+      "types": "./lib/notify.d.ts",
+      "import": "./lib/notify.js",
+      "default": "./lib/notify.js"
+    },
+    "./notify/locale/*.json": "./locale/notify/*.json",
     "./client": "./client.js",
     "./icon": "./icon.svg",
     "./locale/*.json": "./locale/*.json",

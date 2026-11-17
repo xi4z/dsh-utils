@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "无人值守审批门控",
+    "description": "给 subagent／定时／cron 的审批请求设定应答窗口，超时按 fail-closed 落定。"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session notifications",
+    "description": "Pushes a device-tagged message through a Gotify gateway when a turn ends or the agent is blocked on an approval or a question."
+  }
+}

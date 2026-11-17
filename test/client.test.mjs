@@ -164,7 +164,34 @@ function fakeForm(initialValue, { status = 'ready', writable = true, revision = 
   return form
 }
 
-function fakeCtx({ served = ['skill-recursive', 'dsh-approval-policy'], skillValue, approvalValue, skillOptions, approvalOptions } = {}) {
+/** Full stored value of the notify row, matching the component's Config defaults. */
+const NOTIFY_VALUE = {
+  enabled: true,
+  dryRun: true,
+  transport: 'gotify',
+  gotifyUrl: 'https://notify.example.com',
+  gotifyToken: 'gtfya.example',
+  gotifyPriority: 3,
+  gotifyHeaders: {},
+  targets: [],
+  deviceName: '',
+  deviceLabel: '办公本',
+  deviceInTitle: false,
+  notifyOnReasons: ['completed', 'error', 'aborted'],
+  notifyOnApproval: true,
+  notifyOnQuestion: true,
+  questionDelayMs: 2500,
+  approvalDelayMs: 3000,
+  includeSubagents: false,
+  summaryChars: 120,
+  timeoutMs: 8000,
+  traceFile: '',
+  template: '',
+  questionTemplate: '',
+  approvalTemplate: '',
+}
+
+function fakeCtx({ served = ['skill-recursive', 'dsh-approval-policy', 'dsh-notify'], skillValue, approvalValue, notifyValue, skillOptions, approvalOptions, notifyOptions } = {}) {
   const skillForm = fakeForm(skillValue ?? {
     minDepth: 1,
     maxDepth: 8,
@@ -185,11 +212,12 @@ function fakeCtx({ served = ['skill-recursive', 'dsh-approval-policy'], skillVal
     defaultPermissionPreset: 'auto',
     autoReviewContent: true,
   }, approvalOptions)
+  const notifyForm = fakeForm(notifyValue === undefined ? { ...NOTIFY_VALUE } : notifyValue, notifyOptions)
   const registrations = []
   const effects = []
   const ctx = {
     configForms: {
-      get: (namespace) => (namespace === 'skill-recursive' ? skillForm : approvalForm),
+      get: (namespace) => (namespace === 'skill-recursive' ? skillForm : namespace === 'dsh-notify' ? notifyForm : approvalForm),
       whileServed: (namespaces, register) => {
         const servedSet = new Set(served)
         const active = namespaces.some((namespace) => servedSet.has(namespace))
@@ -212,7 +240,7 @@ function fakeCtx({ served = ['skill-recursive', 'dsh-approval-policy'], skillVal
       return cleanup
     },
   }
-  return { ctx, skillForm, approvalForm, registrations, effects }
+  return { ctx, skillForm, approvalForm, notifyForm, registrations, effects }
 }
 
 /** Load the browser half and mount it against the fake host. */
@@ -252,6 +280,7 @@ test('the client half registers one configuration page per mounted row', async (
   const keys = registrations.map(({ options }) => `${options.name}:${options.key}`).sort()
   assert.deepEqual(keys, [
     'plugins.row.config:dsh-utils#dsh-approval-policy',
+    'plugins.row.config:dsh-utils#dsh-notify',
     'plugins.row.config:dsh-utils#skill-recursive',
   ])
 })
@@ -387,14 +416,101 @@ test('a loading or unavailable namespace says so instead of rendering empty inpu
 })
 
 test('the plugin disposes the forms it owns through an effect', async () => {
-  const { effects, skillForm, approvalForm } = await mountClient()
+  const { effects, skillForm, approvalForm, notifyForm } = await mountClient()
   let skillDisposed = false
   let approvalDisposed = false
+  let notifyDisposed = false
   skillForm.dispose = () => { skillDisposed = true }
   approvalForm.dispose = () => { approvalDisposed = true }
+  notifyForm.dispose = () => { notifyDisposed = true }
   const formsEffect = effects.find((entry) => entry.label === 'dsh-utils: configuration forms')
   assert.ok(formsEffect, 'the forms effect is registered')
   formsEffect.execute()()
   assert.equal(skillDisposed, true)
   assert.equal(approvalDisposed, true)
+  assert.equal(notifyDisposed, true)
+})
+
+// ------------------------------------------------------------------ notify --
+
+test('notify page: reasons are a checkbox set stored in canonical order', async () => {
+  const { registrations, notifyForm } = await mountClient()
+  const page = registrations.find(({ options }) => options.key === 'dsh-utils#dsh-notify').component
+
+  let tree = render(createElement(page, {}))
+  checkbox(tree, '出错').props.onChange({ target: { checked: false } })
+  tree = render(createElement(page, {}))
+  checkbox(tree, '被阻塞').props.onChange({ target: { checked: true } })
+  tree = render(createElement(page, {}))
+  await clickSave(tree)
+
+  assert.deepEqual(notifyForm.calls[0].ops, [
+    { op: 'set', path: ['notifyOnReasons'], value: ['completed', 'aborted', 'blocked'] },
+  ])
+})
+
+test('notify page: the targets JSON field accepts an array of targets', async () => {
+  const { registrations, notifyForm } = await mountClient()
+  const page = registrations.find(({ options }) => options.key === 'dsh-utils#dsh-notify').component
+
+  let tree = render(createElement(page, {}))
+  fieldControl(tree, '多目标').props.onChange({
+    target: { value: '[{"name":"qq-home","url":"https://a.example","token":"t","priority":5}]' },
+  })
+  tree = render(createElement(page, {}))
+  await clickSave(tree)
+
+  assert.deepEqual(notifyForm.calls[0].ops, [{
+    op: 'set',
+    path: ['targets'],
+    value: [{ name: 'qq-home', url: 'https://a.example', token: 't', priority: 5 }],
+  }])
+})
+
+test('notify page: malformed JSON blocks the save with a message', async () => {
+  const { registrations, notifyForm } = await mountClient()
+  const page = registrations.find(({ options }) => options.key === 'dsh-utils#dsh-notify').component
+
+  let tree = render(createElement(page, {}))
+  fieldControl(tree, '附加请求头').props.onChange({ target: { value: '{nope}' } })
+  tree = render(createElement(page, {}))
+  await clickSave(tree)
+  tree = render(createElement(page, {}))
+
+  assert.equal(notifyForm.calls.length, 0, 'the Host never sees malformed JSON')
+  assert.equal(textOf(tree).includes('不是合法 JSON'), true)
+})
+
+test('notify page: templates keep their newlines and an unchanged save writes nothing', async () => {
+  const { registrations, notifyForm } = await mountClient()
+  const page = registrations.find(({ options }) => options.key === 'dsh-utils#dsh-notify').component
+
+  let tree = render(createElement(page, {}))
+  await clickSave(tree)
+  assert.equal(notifyForm.calls.length, 0, 'a no-op save never touches the Host')
+
+  fieldControl(tree, '会话结束模板').props.onChange({ target: { value: '[DSH] {status}\n回复: {reply}' } })
+  tree = render(createElement(page, {}))
+  await clickSave(tree)
+
+  assert.deepEqual(notifyForm.calls[0].ops, [
+    { op: 'set', path: ['template'], value: '[DSH] {status}\n回复: {reply}' },
+  ])
+})
+
+test('notify page: the dry-run switch and the text fields save as typed', async () => {
+  const { registrations, notifyForm } = await mountClient()
+  const page = registrations.find(({ options }) => options.key === 'dsh-utils#dsh-notify').component
+
+  let tree = render(createElement(page, {}))
+  checkbox(tree, '只记日志').props.onChange({ target: { checked: false } })
+  tree = render(createElement(page, {}))
+  fieldControl(tree, '网关地址').props.onChange({ target: { value: '  https://notify.example.org  ' } })
+  tree = render(createElement(page, {}))
+  await clickSave(tree)
+
+  assert.deepEqual(notifyForm.calls[0].ops, [
+    { op: 'set', path: ['dryRun'], value: false },
+    { op: 'set', path: ['gotifyUrl'], value: 'https://notify.example.org' },
+  ])
 })
