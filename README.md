@@ -4,11 +4,15 @@ DeepSeek Harness 工具 bundle：一个包、三个组件。安装一次，三�
 
 | 组件 | 挂载项 id | 包内入口 | 作用 |
 |---|---|---|---|
-| 递归技能发现 | `skill-recursive` | 包根 `dsh-utils` | 在嵌套目录里发现 `SKILL.md`，补足内置提供方只读一层的问题 |
+| 递归技能发现 | `skill-recursive` | 子路径 `dsh-utils/skill-recursive` | 在嵌套目录里发现 `SKILL.md`，补足内置提供方只读一层的问题 |
 | 无人值守审批门控 | `dsh-approval-policy` | 子路径 `dsh-utils/approval-policy` | 给 subagent / 定时 / cron 审批请求设定应答窗口，超时按 fail-closed 落定 |
 | 会话通知 | `dsh-notify` | 子路径 `dsh-utils/notify` | 会话跑完一轮、等待授权或等待回答时，经 Gotify 网关推一条带设备名的消息 |
 
-包根入口是递归技能发现组件：浏览器半侧（`client.js`，三条挂载项各自的配置页）由 DSH 的客户端模块扫描器通过挂载项的包名发现，包根入口必须指向带 `dsh.client` 的那个包名。另外两个组件用子路径导出，因此不会和根入口抢名字。
+三条挂载项都走子路径导出，因此每个组件的插件页标题可以各读自己的 `locale`（递归Skill插件 / 无人值守审批门控 / 会话通知），bundle 自己仍叫「Harness 工具集」。代价见下面「关于配置界面」。
+
+### 关于配置界面
+
+DSH 的客户端模块扫描器只从**包根挂载行**（`name: dsh-utils` 这种不带斜杠的裸包名，且该行未禁用）加载 `client.js`。本 bundle 现在没有任何包根行，所以宿主不会加载浏览器半侧，插件页里也就没有各行的配置表单；配置走 `cordis.patch.yml`（bundle 里的默认值 + profile 里的按 id 覆盖）。包根导出 `dsh-utils` 仍然存在并指向同一个技能发现模块，供需要 `client.js` 的部署自己挂一条包根行。
 
 ## 安装
 
@@ -26,7 +30,7 @@ dsh plugin --profile <profile> add github:xi4z/dsh-utils
 
 本地开发用 `target=<本包绝对路径>`，或 CLI 里 `add link:<本包绝对路径>`。仓库已包含构建产物 `lib/`，从 GitHub 安装不需要再跑构建。
 
-安装后 bundle 的 patch 自动插入三条挂载项，无需手写挂载块；`cordis.patch.yml` 里的 `config:` 只用于配置。浏览器半侧随宿主启动时的客户端模块扫描加载，安装或更新后重启宿主（或重开窗口）才会出现配置界面。
+安装后 bundle 的 patch 自动插入三条挂载项，无需手写挂载块；`cordis.patch.yml` 里的 `config:` 只用于配置。挂载项的新增/改名要重启宿主才会生效。
 
 ## 组件一：递归技能发现
 
@@ -255,17 +259,18 @@ template: |
     dryRun: false
 ```
 
-三个 id 同时就是 settings 命名空间，浏览器侧通过 `ctx.configForms` 直接读写它们，所以配置既能写进 `cordis.patch.yml`，也能在界面里改：插件页 → 递归Skill插件（`dsh-utils` bundle）→ 任一组件的行 → 该行的配置入口，打开的页面里只有这个组件的字段和一个「保存」。
+三个 id 同时就是 settings 命名空间，配置写在 `cordis.patch.yml` 里：bundle 自带默认值，profile 里按 id 覆盖。本 bundle 目前不挂包根行，所以插件页没有各行的配置表单（原因见「关于配置界面」）；组件启用/停用、运行状态仍照常在插件页显示与操作。
 
-包内 `client.js` 用 `ctx.configForms.whileServed(['skill-recursive','dsh-approval-policy','dsh-notify'], …)` 把每条挂载项的配置页注册到 `plugins.row.config`（key = `dsh-utils#<挂载项 id>`）：宿主没有向浏览器暴露某个命名空间时，对应页面不会出现，也不会渲染空表单。写入走宿主 settings 文档，三个组件的配置字段全部 volatile，保存后即时生效，无需重启。
+包内的 `client.js` 仍然保留：它用 `ctx.configForms.whileServed(['skill-recursive','dsh-approval-policy','dsh-notify'], …)` 把三条挂载项的配置页注册到 `plugins.row.config`（key = `dsh-utils#<挂载项 id>`）。只有当某个部署额外挂一条 `name: dsh-utils` 的包根行时，宿主才会加载它；三个组件的配置字段全部 volatile，写入走宿主 settings 文档，保存后即时生效。
 
 ## 包结构
 
 ```
 dsh-utils/
 ├── cordis.patch.yml      三条挂载项
-├── client.js             浏览器半侧：每条挂载项一页配置表单
-├── locale/{en,zh}.json   bundle 展示名与描述（根组件行的标题也读这份）
+├── client.js             浏览器半侧（仅包根挂载行存在时由宿主加载）
+├── locale/{en,zh}.json   bundle 展示名与描述
+├── locale/skill-recursive/  技能发现行的独立标题
 ├── locale/approval-policy/  审批门控行的独立标题
 ├── locale/notify/           通知行的独立标题
 ├── icon.svg

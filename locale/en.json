@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Recursive Skill plugin",
-    "description": "The Harness utility bundle whose root component is recursive SKILL.md discovery; the same package also provides the unattended approval gate and session notifications (Gotify)."
+    "title": "Harness Utilities",
+    "description": "One bundle, three components: recursive SKILL.md discovery in nested skill folders, an unattended approval gate that bounds approval requests before settling fail-closed, and turn-end / approval / question notifications pushed through a Gotify gateway."
   }
 }

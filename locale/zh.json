@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "递归Skill插件",
-    "description": "以递归技能发现为主组件的 Harness 工具集 bundle：同一份包还提供无人值守审批门控与会话通知（Gotify）。"
+    "title": "Harness 工具集",
+    "description": "一个 bundle 三个组件：嵌套目录里的 SKILL.md 递归发现，给审批请求设定应答窗口、超时按 fail-closed 落定的无人值守审批门控，以及把会话结束／等待授权／等待回答推送到 Gotify 网关的通知。"
   }
 }

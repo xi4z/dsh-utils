@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Recursive Skill plugin",
+    "description": "Discovers SKILL.md files in nested skill folders, beyond the built-in provider's single level; flat skills of the same name still win."
+  }
+}

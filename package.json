@@ -32,6 +32,12 @@
       "import": "./lib/skill-recursive.js",
       "default": "./lib/skill-recursive.js"
     },
+    "./skill-recursive": {
+      "types": "./lib/skill-recursive.d.ts",
+      "import": "./lib/skill-recursive.js",
+      "default": "./lib/skill-recursive.js"
+    },
+    "./skill-recursive/locale/*.json": "./locale/skill-recursive/*.json",
     "./approval-policy": {
       "types": "./lib/approval-policy.d.ts",
       "import": "./lib/approval-policy.js",

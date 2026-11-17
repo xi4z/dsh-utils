@@ -4,10 +4,10 @@
 # its own settings namespace (the entry id) and its own Config schema:
 #
 #   skill-recursive      — recursive SKILL.md discovery in nested skill folders.
-#                          Mounted from the package root, because the bundle's
-#                          browser half (client.js, the settings forms) is found
-#                          by the client-module scanner through the root entry's
-#                          package name.
+#                          Mounted from the `skill-recursive` subpath export, so
+#                          the row carries its own locale title; the package root
+#                          export still points at the same module for deployments
+#                          that mount it directly.
 #   dsh-approval-policy  — unattended approval gate: subagent/scheduled/cron
 #                          approval requests wait a bounded window, then settle
 #                          with a fail-closed default instead of hanging forever.
@@ -17,12 +17,15 @@
 #                          Gotify gateway, tagged with this device's name.
 #                          Mounted from the `notify` subpath export.
 #
-# Row configs stay in this file's `config:` block or in the profile's
-# cordis.patch.yml under the same ids; both ids double as settings namespaces.
+# Every component mounts through a subpath, so no Loader row mounts the package
+# root. DSH's client-module scanner only serves client.js for an enabled
+# package-root row, so this bundle ships no settings forms: configuration lives
+# in this file's `config:` blocks or in the profile's cordis.patch.yml. Row ids
+# double as settings namespaces and stay stable either way.
 
 - insert:
     - id: skill-recursive
-      name: dsh-utils
+      name: dsh-utils/skill-recursive
       config: {}
     - id: dsh-approval-policy
       name: dsh-utils/approval-policy
@@ -35,7 +38,7 @@
         # 出口：Gotify 网关。url/token 建议用环境变量注入，避免把凭据写进仓库：
         #   DSH_QQ_NOTIFY_GOTIFY_URL / DSH_QQ_NOTIFY_GOTIFY_TOKEN
         transport: gotify
-        # 先只记日志：确认能收到再改成 false（或装好后在插件页的配置里关掉）。
+        # 先只记日志：确认能收到再改成 false（或在 profile patch 里覆盖）。
         dryRun: true
         # 设备名留空 = 自动取主机名；deviceLabel 是渲染到 {device} 的显示名。
         deviceName: ''
