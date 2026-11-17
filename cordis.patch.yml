@@ -1,0 +1,25 @@
+# dsh-utils — two utility components mounted as one bundle.
+#
+# The bundle contains two components, each an independent Cordis plugin with its
+# own settings namespace (the entry id) and its own Config schema:
+#
+#   skill-recursive      — recursive SKILL.md discovery in nested skill folders.
+#                          Mounted from the package root, because the bundle's
+#                          browser half (client.js, the settings form) is found by
+#                          the client-module scanner through the root entry's
+#                          package name.
+#   dsh-approval-policy  — unattended approval gate: subagent/scheduled/cron
+#                          approval requests wait a bounded window, then settle
+#                          with a fail-closed default instead of hanging forever.
+#                          Mounted from the `approval-policy` subpath export.
+#
+# Row configs stay in this file's `config:` block or in the profile's
+# cordis.patch.yml under the same ids; both ids double as settings namespaces.
+
+- insert:
+    - id: skill-recursive
+      name: dsh-utils
+      config: {}
+    - id: dsh-approval-policy
+      name: dsh-utils/approval-policy
+      config: {}

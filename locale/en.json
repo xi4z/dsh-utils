@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Utilities",
+    "description": "One bundle, two components: recursive SKILL.md discovery in nested skill folders, and an unattended approval gate that bounds approval requests before settling fail-closed."
+  }
+}

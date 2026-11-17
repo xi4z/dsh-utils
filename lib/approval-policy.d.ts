@@ -1,0 +1,297 @@
+/**
+ * `dsh-utils` approval-policy component: the unattended approval gate, with
+ * two additions for the experimental auto approval (the `auto` permission
+ * preset published by `@deepseek-ai/dsh-experimental-auto-review`):
+ *
+ *   1. `defaultPermissionPreset` — pin every NEW session to a configured
+ *      preset. `"auto"` makes the experimental auto approval the deployment's
+ *      default approval strategy; the host itself refuses `auto` as a
+ *      `permissionPresets.defaultPreset` value (it is a current-session-only
+ *      preset), so this is the one seam that can default a deployment to it.
+ *   2. `autoReviewContent` — when the window expires on a request the auto
+ *      approval raised (the reviewer's `ask`), the model-facing tool result
+ *      gains the reviewer's own content. The host's approval pipeline renders
+ *      only "the user rejected tool X" for any `rejected` outcome, which would
+ *      drop the reviewer's reason; this component appends it through
+ *      `tools/post-execute` so the Agent reads what the auto approval decided
+ *      and why, not just that the call was denied.
+ *
+ * The bundle mounts this component under the entry id `dsh-approval-policy`
+ * (`dsh-utils/approval-policy`); that entry id is also its settings namespace.
+ *
+ * On the host's 'approval/request' cordis waterfall this component is a racing
+ * gate answerer. For sessions/turns declared unattended (config: origins /
+ * sessions) it does not simply claim the request — it delegates with next()
+ * FIRST and races the downstream chain against a bounded window. Whoever
+ * settles first wins:
+ *
+ *   - a downstream answerer answers inside the window → its answer wins
+ *     (an instant fail-closed 'unavailable' from an empty chain passes
+ *     through untouched — nothing to wait for);
+ *   - the window expires → the configured fail-closed default settles the
+ *     approval ('rejected'; 'unavailable' also allowed — 'allowed-once' is
+ *     schema-forbidden). The turn proceeds denied instead of hanging;
+ *   - the request's abort signal resolves 'cancelled' upstream — the host
+ *     races the signal itself; a late window expiry is simply ignored.
+ *
+ * Unattended detection (config `origins`), in evaluation order:
+ *
+ *   - sessions: glob-matched against the requesting agent id — an explicit
+ *     name wins and gates EVERY turn of that session (session-level);
+ *   - all: gate everything (opt-in escape hatch);
+ *   - subagent: session.header.origin === 'subagent' (session-level — a
+ *     subagent session is dedicated to delegation);
+ *   - scheduled / cron: turn-level — the last PROVENANCE-bearing user
+ *     message's source.kind is 'schedule' (host dsh-schedule) or 'cron'
+ *     (dsh-cron). Synthetic context injections (runtime-context,
+ *     skill-catalog, …) also ride role='user' and are skipped — they land
+ *     after the trigger and would otherwise shadow it. Turn-level because
+ *     those sessions are shared with humans: only machine-driven turns
+ *     gate, and a human steering afterwards (last provenance message =
+ *     human — 'user', or a timed-ask late reply 'user-question-reply')
+ *     keeps the interactive default.
+ *
+ * The listener registers with prepend: true — the gate sits ahead of the
+ * interactive answerers (web remote answerer, dsh-feishu card) regardless of
+ * plugin load order, so an unattended request is windowed before a human
+ * surface claims it. Gated requests still reach those surfaces through
+ * next() inside the window. Interactive turns delegate immediately — the
+ * interactive default is unchanged.
+ *
+ * Audit: the host owns approval/asked + approval/decided — every decision,
+ * whichever answerer made it, lands in the session transcript. The gate
+ * never writes to the session log itself; the auto-approval addition rides the
+ * tool result the pipeline already materializes.
+ *
+ * Config: `export const Config` is the settings-page schema (all keys
+ * volatile, all defaults fail-closed-friendly); `apply` reads them through
+ * live references like dsh-cron does.
+ *
+ * @module dsh-utils/approval-policy
+ */
+import type { Context } from '@deepseek-ai/cordis';
+import z from '@deepseek-ai/schemastery';
+import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval/types';
+import type { ContentBlock } from '@deepseek-ai/dsh-llm';
+export declare const name = "dsh-approval-policy";
+/** Origins a deployment may declare unattended (config vocabulary). */
+export type UnattendedOrigin = 'subagent' | 'scheduled' | 'cron' | 'all';
+/**
+ * The only outcomes a gate may settle with. 'allowed-once' is deliberately
+ * absent from this union AND from the config enum: an unattended default
+ * must never grant — fail closed is the whole point.
+ */
+export type GatedOutcome = 'rejected' | 'unavailable';
+/** Settings-page schema; each key arrives as a volatile live reference. */
+export declare const Config: z<Schemastery.ObjectS<NoInfer<{
+    /** Session/turn origins treated as unattended. Default: subagent + scheduled. */
+    origins: z<NoInfer<("subagent" | "scheduled" | "cron" | "all")[]>, NoInfer<("subagent" | "scheduled" | "cron" | "all")[]>, "volatile-defined">;
+    /** Glob patterns matched against the requesting agent id; a hit gates every turn of that session. */
+    sessions: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
+    /** Answer window in seconds (whole seconds; no .int() chain exists — min/max bound it); 0 denies without delegating. Default 60. */
+    windowSeconds: z<number, number, "volatile-defined">;
+    /** Settled when the window expires; 'allowed-once' is not in the union. */
+    defaultOutcome: z<"rejected" | "unavailable", "rejected" | "unavailable", "volatile-defined">;
+    /**
+     * Permission preset pinned into every new session; '' keeps the host default.
+     * 'auto' selects the experimental auto approval (requires the
+     * `@deepseek-ai/dsh-experimental-auto-review` bundle); any configured preset
+     * name is accepted. The host rejects 'auto' as its own `defaultPreset`, and
+     * the pinned value is a durable `permission/preset` event, so every later
+     * turn reads the real knobs instead of a component-side override.
+     */
+    defaultPermissionPreset: z<string, string, "volatile-defined">;
+    /**
+     * Append the experimental auto approval's own content to the model-facing
+     * tool result when this gate's window (not a human, not another answerer)
+     * rejects a request the reviewer raised. Default true.
+     */
+    autoReviewContent: z<boolean, boolean, "volatile-defined">;
+}>>, Schemastery.ObjectT<NoInfer<{
+    /** Session/turn origins treated as unattended. Default: subagent + scheduled. */
+    origins: z<NoInfer<("subagent" | "scheduled" | "cron" | "all")[]>, NoInfer<("subagent" | "scheduled" | "cron" | "all")[]>, "volatile-defined">;
+    /** Glob patterns matched against the requesting agent id; a hit gates every turn of that session. */
+    sessions: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
+    /** Answer window in seconds (whole seconds; no .int() chain exists — min/max bound it); 0 denies without delegating. Default 60. */
+    windowSeconds: z<number, number, "volatile-defined">;
+    /** Settled when the window expires; 'allowed-once' is not in the union. */
+    defaultOutcome: z<"rejected" | "unavailable", "rejected" | "unavailable", "volatile-defined">;
+    /**
+     * Permission preset pinned into every new session; '' keeps the host default.
+     * 'auto' selects the experimental auto approval (requires the
+     * `@deepseek-ai/dsh-experimental-auto-review` bundle); any configured preset
+     * name is accepted. The host rejects 'auto' as its own `defaultPreset`, and
+     * the pinned value is a durable `permission/preset` event, so every later
+     * turn reads the real knobs instead of a component-side override.
+     */
+    defaultPermissionPreset: z<string, string, "volatile-defined">;
+    /**
+     * Append the experimental auto approval's own content to the model-facing
+     * tool result when this gate's window (not a human, not another answerer)
+     * rejects a request the reviewer raised. Default true.
+     */
+    autoReviewContent: z<boolean, boolean, "volatile-defined">;
+}>>, "plain">;
+/** Volatile Config fields arrive as live references; `.get()` snapshots. */
+interface VolatileRef<T> {
+    get(): T;
+}
+/** The runtime shape `apply` receives (every field volatile). */
+export interface GateRuntimeConfig {
+    origins: VolatileRef<UnattendedOrigin[]>;
+    sessions: VolatileRef<string[]>;
+    windowSeconds: VolatileRef<number>;
+    defaultOutcome: VolatileRef<GatedOutcome>;
+    defaultPermissionPreset: VolatileRef<string>;
+    autoReviewContent: VolatileRef<boolean>;
+}
+/** Canonical identity of the experimental per-call review preset. */
+export declare const AUTO_REVIEW_PRESET = "auto";
+/**
+ * The reviewer-owned prefix of an approval reason raised by
+ * `@deepseek-ai/dsh-experimental-auto-review` when its review denies a call
+ * under the `ask` policy (`Auto review denied tool "<name>": <reason>`).
+ * Matching the reason rather than the session preset keeps the attribution
+ * correct when the policy switches between the ask and its settlement.
+ */
+export declare const AUTO_REVIEW_REASON_PREFIX = "Auto review denied tool \"";
+/**
+ * The model-facing denial text the host pipeline renders for ANY `rejected`
+ * approval outcome (`packages/core/tools/src/pipeline.ts`). Host 0.2.2-rc.1
+ * records no structured error info, so the text is the only stable, version-
+ * tolerant discriminator; newer lines also carry `{ name: ApprovalError }`.
+ */
+export declare function rejectedApprovalMessage(toolName: string): string;
+/** Whether one failed tool result is the pipeline's rejection of an approval ask. */
+export declare function isRejectedApprovalResult(result: {
+    readonly isError: boolean;
+    readonly error: {
+        readonly message: string;
+        readonly info?: {
+            readonly name?: string;
+            readonly code?: string;
+        };
+    };
+}, toolName: string): boolean;
+/** Compiled glob: `*` matches anything, everything else is literal. */
+export declare function globToRegExp(pattern: string): RegExp;
+/** What the gate reads off the requesting agent to classify the turn. */
+export interface OriginFacts {
+    /** session.header.origin when the live session is readable ('subagent' …). */
+    headerOrigin?: string;
+    /** source.kind of the session's last user message ('schedule', 'cron', 'user', …). */
+    lastUserMessageKind?: string;
+}
+/** Structural slices of the runtime faces — no closure type imports needed. */
+interface MsgLike {
+    readonly role?: string;
+    readonly source?: {
+        readonly kind?: string;
+    };
+}
+interface EventLike {
+    readonly type?: string;
+}
+interface SessionLike {
+    readonly header?: {
+        readonly origin?: string;
+    };
+    deriveMessages?(): MsgLike[];
+    snapshotEvents?(): readonly EventLike[];
+}
+interface AgentLike {
+    readonly id?: unknown;
+    readonly session?: SessionLike;
+}
+/**
+ * Read the origin facts off the request's agent. Both reads are best-effort:
+ * a projected agent without a live session yields `{}` (only `sessions`/`all`
+ * can then gate), and each fact independently degrades to undefined.
+ */
+export declare function readFacts(agent: AgentLike | undefined): OriginFacts;
+/** Gate predicate: explicit session hit → 'all' → session/turn origins. */
+export declare function shouldGate(config: {
+    readonly origins: readonly UnattendedOrigin[];
+    readonly sessions: readonly string[];
+}, sessionId: string, facts: OriginFacts): boolean;
+/** Which side of the race produced the settled outcome. */
+export type GateSettledBy = 'downstream' | 'window';
+/** One gate result: the outcome plus the side that produced it. */
+export interface GateSettlement {
+    readonly outcome: ApprovalOutcome;
+    readonly settledBy: GateSettledBy;
+}
+/**
+ * The gate: delegate first, race the downstream chain against the window.
+ *
+ * windowMs <= 0 denies immediately WITHOUT calling `decision` (the 0 = instant
+ * deny degenerate case — downstream never sees the request, mirroring the
+ * host's approval/policy=never); that settlement is reported as `'window'`
+ * because no answerer produced it. A fast `decision` (including an instant
+ * fail-closed 'unavailable' from an empty chain) passes through untouched;
+ * only a pending decision races the timer.
+ */
+export declare function raceGate(decision: () => Promise<ApprovalOutcome>, windowMs: number, defaultOutcome: GatedOutcome): Promise<GateSettlement>;
+/** Whether an approval reason was raised by the experimental auto approval. */
+export declare function isAutoReviewAsk(reason: string | undefined): boolean;
+/** One window-rejected auto-review request waiting for its tool result. */
+export interface AutoReviewSettle {
+    /** Tool whose approval the reviewer raised. */
+    readonly toolName: string;
+    /** The reviewer-owned approval reason, verbatim. */
+    readonly reason: string;
+    /** Wall clock of the settlement, for TTL pruning. */
+    readonly at: number;
+}
+/** Remember one settlement under its tool-call id (absent call ids cannot claim a result). */
+export declare function recordAutoReviewSettle(store: Map<string, AutoReviewSettle>, callId: string | undefined, settle: AutoReviewSettle): void;
+/**
+ * Take and forget the settlement for one tool call; expired entries are pruned
+ * first so a result arriving after the TTL never claims stale content.
+ */
+export declare function takeAutoReviewSettle(store: Map<string, AutoReviewSettle>, callId: string | undefined, now: number): AutoReviewSettle | undefined;
+/** The model-facing sentence appended to the denied tool result. */
+export declare function autoReviewNotice(toolName: string, reason: string): string;
+/** Append the auto approval's content to the model-facing result content. */
+export declare function withAutoReviewContent(content: readonly ContentBlock[], settle: AutoReviewSettle): ContentBlock[];
+/** What the permission projection already recorded in a session log. */
+export interface PermissionFacts {
+    /** The session log was readable at all. */
+    readonly readable: boolean;
+    /** The session already started a turn (a resumed or user-driven session). */
+    readonly turnStarted: boolean;
+    /** The host (or a user) already recorded permission state. */
+    readonly permissionState: boolean;
+    /** The log carries the constructor-seed boundary of a seeded session. */
+    readonly seeded: boolean;
+}
+/**
+ * Fold the permission-relevant facts out of a session log. A session that
+ * cannot expose its events is reported unreadable so the caller skips pinning
+ * instead of overriding a restored selection it cannot see.
+ */
+export declare function readPermissionFacts(session: SessionLike | undefined): PermissionFacts;
+/** Inputs for the default-preset decision. */
+export interface DefaultPresetDecision {
+    /** Configured preset name; '' means leave the session alone. */
+    readonly configured: string;
+    /** Preset the session currently resolves to. */
+    readonly current: string;
+    /** The host's deployment default preset. */
+    readonly hostDefault: string;
+    /** Permission facts folded from the session log. */
+    readonly facts: PermissionFacts;
+}
+/**
+ * Decide whether a new session may take the configured default preset.
+ *
+ * A session qualifies while it has no turn and no seed boundary. It qualifies
+ * either before the host pinned its own default (no permission state yet — the
+ * gate ran first) or right after the host pinned exactly that default (the
+ * session is still untouched, so the pin is creation-time state rather than a
+ * user choice). Anything else is a resumed, seeded, or deliberately switched
+ * session and keeps its recorded permission.
+ */
+export declare function shouldPinDefaultPreset(decision: DefaultPresetDecision): boolean;
+export declare function apply(ctx: Context, config: GateRuntimeConfig): void;
+export {};

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness 工具集",
+    "description": "一个 bundle 两个组件：嵌套目录里的 SKILL.md 递归发现，以及给审批请求设定应答窗口、超时按 fail-closed 落定的无人值守审批门控。"
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "name": "dsh-utils",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness utility bundle: two components — recursive SKILL.md discovery in nested skill folders, and an unattended approval gate that bounds approval requests and settles fail-closed",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "deepseek-harness",
+    "skills",
+    "skill-discovery",
+    "approval",
+    "unattended"
+  ],
+  "license": "MIT",
+  "author": "xi4z",
+  "homepage": "https://github.com/xi4z/dsh-utils",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xi4z/dsh-utils.git"
+  },
+  "type": "module",
+  "main": "./lib/skill-recursive.js",
+  "types": "./lib/skill-recursive.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/skill-recursive.d.ts",
+      "import": "./lib/skill-recursive.js",
+      "default": "./lib/skill-recursive.js"
+    },
+    "./approval-policy": {
+      "types": "./lib/approval-policy.d.ts",
+      "import": "./lib/approval-policy.js",
+      "default": "./lib/approval-policy.js"
+    },
+    "./client": "./client.js",
+    "./icon": "./icon.svg",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client.js",
+    "cordis.patch.yml",
+    "locale",
+    "skills",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run build && node --check client.js && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "~3.19.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-agent": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-settings": "^0.2.2-rc.2",
+    "@deepseek-ai/dsh-skill": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-user-approval": "0.2.2-rc.2",
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    },
+    "engines": {
+      "dsh": ">=0.2.1-rc.5 <0.4.0-0"
+    }
+  }
+}
