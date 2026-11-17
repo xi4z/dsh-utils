@@ -11,17 +11,19 @@ DeepSeek Harness 工具 bundle：一个包、两个组件。安装一次，两�
 
 ## 安装
 
-Desktop 应用或任一带插件管理器的会话：
+Desktop 应用或任一带插件管理器的会话，从仓库装：
 
 ```
-plugin_manager action=install_bundle target=<本包绝对路径>
+plugin_manager action=install_bundle target=github:xi4z/dsh-utils
 ```
 
 CLI profile：
 
 ```sh
-dsh plugin --profile <profile> add link:<本包绝对路径>
+dsh plugin --profile <profile> add github:xi4z/dsh-utils
 ```
+
+本地开发用 `target=<本包绝对路径>`，或 CLI 里 `add link:<本包绝对路径>`。仓库已包含构建产物 `lib/`，从 GitHub 安装不需要再跑构建。
 
 安装后 bundle 的 patch 自动插入两条挂载项，无需手写挂载块；`cordis.patch.yml` 里的 `config:` 只用于配置。浏览器半侧随宿主启动时的客户端模块扫描加载，安装或更新后重启宿主（或重开窗口）才会出现配置界面。
 
