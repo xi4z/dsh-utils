@@ -135,6 +135,23 @@ agent/status   →  running → idle 的边沿 = 整个任务干完的那一刻
 
 `endpoint` / `token` / `targetType` / `targetId` 只在 `transport: onebot` 的旧直连路径下使用，对应 `DSH_QQ_NOTIFY_URL` 等环境变量。
 
+### 密钥走环境变量
+
+字符串字段支持 `${NAME}` / `${NAME:-默认值}` 插值（`gotifyUrl`、`gotifyToken`、`endpoint`、`token`、`targetId`、`gotifyHeaders` 的值，以及 `targets[]` 的 `url` / `token`）。变量未设置或为空时展开成空串（该目标缺 token 会被跳过并记 warning），不会把 `${...}` 原文发出去；插值在每次投递前解析，密钥不会进日志。
+
+```yaml
+- id: dsh-notify
+  config:
+    gotifyUrl: '${DSH_GOTIFY_URL}'
+    gotifyToken: '${DSH_GOTIFY_TOKEN}'
+    targets:
+      - name: qq-home
+        urlEnv: DSH_GOTIFY_URL
+        tokenEnv: DSH_GOTIFY_TOKEN
+```
+
+`targets[]` 还支持 `urlEnv` / `tokenEnv`（直接写变量名，优先于字面量字段）。另外整表覆盖的环境变量优先级最高：`DSH_QQ_NOTIFY_GOTIFY_URL`、`DSH_QQ_NOTIFY_GOTIFY_TOKEN`、`DSH_QQ_NOTIFY_TARGETS` 等（见上表）。
+
 ### 多设备：每台机器都能通知，也能分清是谁
 
 公网网关对任何来源 IP 开放（仅按 token/IP 限流），所以其他设备上不需要部署 relay、不需要 NapCat，也不需要本机开任何端口：
@@ -287,7 +304,7 @@ dsh-utils/
 ```sh
 npm install
 npm run build     # tsc -> lib/
-npm test          # 构建 + client.js 语法检查 + node --test（96 个用例）
+npm test          # 构建 + client.js 语法检查 + node --test（99 个用例）
 ```
 
 ## 兼容性

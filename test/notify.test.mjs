@@ -758,3 +758,80 @@ test('live settings refs are re-read on every event', async (t) => {
   await settle()
   assert.equal(mock.requests.length, 1, 'the same instance picked up the new value')
 })
+
+
+// ---- secrets from the environment ----
+
+test('an ${ENV} reference in gotify url/token is expanded at send time', async (t) => {
+  const mock = await startMock()
+  t.after(() => mock.close())
+  const agent = { id: 'sess-env1', session: { header: { cwd: '/root/core' } } }
+  const ctx = fakeContext([agent])
+  process.env.DSU_TEST_GOTIFY_URL = 'http://127.0.0.1:' + mock.port
+  process.env.DSU_TEST_GOTIFY_TOKEN = 'gtfya.from-env'
+  t.after(() => {
+    delete process.env.DSU_TEST_GOTIFY_URL
+    delete process.env.DSU_TEST_GOTIFY_TOKEN
+  })
+  apply(ctx, {
+    enabled: true,
+    transport: 'gotify',
+    gotifyUrl: '${DSU_TEST_GOTIFY_URL}',
+    gotifyToken: '${DSU_TEST_GOTIFY_TOKEN}',
+    dryRun: false,
+    timeoutMs: 3000,
+  })
+
+  ctx.emit('session/event', { id: 'sess-env1' }, { type: 'turn/start', data: { turn: 1 } })
+  ctx.emit('session/event', { id: 'sess-env1' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  ctx.emit('agent/status', { agent, status: 'idle' })
+  await settle(150)
+
+  assert.equal(mock.requests.length, 1)
+  assert.equal(mock.requests[0].headers['x-gotify-key'], 'gtfya.from-env')
+  assert.match(mock.requests[0].body.message, /目录: \/root\/core/)
+})
+
+test('per-target urlEnv/tokenEnv name the variables and ${ENV:-fallback} keeps a default', async (t) => {
+  const mock = await startMock()
+  t.after(() => mock.close())
+  process.env.DSU_TARGET_URL = 'http://127.0.0.1:' + mock.port
+  process.env.DSU_TARGET_TOKEN = 'gtfya.target-env'
+  t.after(() => {
+    delete process.env.DSU_TARGET_URL
+    delete process.env.DSU_TARGET_TOKEN
+  })
+  const agent = { id: 'sess-env2', session: { header: {} } }
+  const ctx = fakeContext([agent])
+  apply(ctx, {
+    enabled: true,
+    transport: 'gotify',
+    targets: [
+      { name: 'env', urlEnv: 'DSU_TARGET_URL', tokenEnv: 'DSU_TARGET_TOKEN' },
+      { name: 'fallback', url: '${DSU_TARGET_URL}', token: '${DSU_MISSING_TOKEN:-gtfya.fallback}' },
+    ],
+    dryRun: false,
+    timeoutMs: 3000,
+  })
+
+  ctx.emit('session/event', { id: 'sess-env2' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  ctx.emit('agent/status', { agent, status: 'idle' })
+  await settle(150)
+
+  const keys = mock.requests.map((request) => request.headers['x-gotify-key']).sort()
+  assert.deepEqual(keys, ['gtfya.fallback', 'gtfya.target-env'])
+})
+
+test('an unset ${ENV} reference leaves the target without a token instead of sending the literal text', async () => {
+  const { normalizeTargets } = await import('../lib/notify.js')
+  process.env.DSU_SET_VAR = 'x'
+  const list = normalizeTargets([
+    { name: 'a', url: 'https://${DSU_SET_VAR}.example', token: '${DSU_UNSET_VAR:-from-default}' },
+    { name: 'b', url: 'https://b.example', token: '${DSU_UNSET_VAR}' },
+  ])
+  delete process.env.DSU_SET_VAR
+  assert.equal(list.length, 2)
+  assert.equal(list[0].url, 'https://x.example')
+  assert.equal(list[0].token, 'from-default')
+  assert.equal(list[1].token, '')
+})

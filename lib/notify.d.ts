@@ -178,6 +178,13 @@ interface Options {
     questionTemplate: string;
     approvalTemplate: string;
 }
+/**
+ * Expand `${NAME}` and `${NAME:-fallback}` references against the process
+ * environment, so a deployment can keep gateway secrets outside the patch file.
+ * An unset or blank variable expands to the fallback (or to ''), leaving the
+ * target without a token instead of sending the literal reference.
+ */
+export declare function expandEnv(value: unknown): string;
 /** Keep only string/number request headers; ignore everything else. */
 export declare function normalizeHeaders(raw: unknown): Record<string, string>;
 /**

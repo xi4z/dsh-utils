@@ -128,10 +128,10 @@ export const Config = z.object({
   targetType: z.union(['private', 'group']).default(DEFAULTS.targetType).description('Legacy OneBot recipient kind.').volatile(),
   targetId: z.string().default(DEFAULTS.targetId).description('Legacy OneBot recipient id.').volatile(),
   gotifyUrl: z.string().default(DEFAULTS.gotifyUrl).description('Gotify gateway base URL.').volatile(),
-  gotifyToken: z.string().default(DEFAULTS.gotifyToken).description('Gotify application token (series).').volatile(),
+  gotifyToken: z.string().default(DEFAULTS.gotifyToken).description('Gotify application token; supports ${ENV} references.').volatile(),
   gotifyPriority: z.natural().default(DEFAULTS.gotifyPriority).description('Default message priority.').volatile(),
   gotifyHeaders: z.any().default({}).description('Extra request headers for the gateway.').volatile(),
-  targets: z.any().default([]).description('Multiple gateway targets; overrides the single-url fields.').volatile(),
+  targets: z.any().default([]).description('Multiple gateway targets; supports ${ENV} in url/token and urlEnv/tokenEnv.').volatile(),
   deviceName: z.string().default(DEFAULTS.deviceName).description('Device identity; empty = hostname.').volatile(),
   deviceLabel: z.string().default(DEFAULTS.deviceLabel).description('Human-readable device name for {device}.').volatile(),
   deviceInTitle: z.boolean().default(DEFAULTS.deviceInTitle).description('Prefix the Gotify title with the device label.').volatile(),
@@ -238,6 +238,25 @@ function text(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
 }
 
+/** Read one environment variable, trimmed; unset or blank yields ''. */
+function envValue(name: string): string {
+  const found = process.env[name]
+  return typeof found === 'string' ? found.trim() : ''
+}
+
+/**
+ * Expand `${NAME}` and `${NAME:-fallback}` references against the process
+ * environment, so a deployment can keep gateway secrets outside the patch file.
+ * An unset or blank variable expands to the fallback (or to ''), leaving the
+ * target without a token instead of sending the literal reference.
+ */
+export function expandEnv(value: unknown): string {
+  return String(value ?? '').replace(/\${([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?}/g, (_whole, name: string, fallback?: string) => {
+    const found = envValue(name)
+    return found !== '' ? found : (fallback ?? '')
+  })
+}
+
 /** A finite number at or above `minimum`, or the fallback. */
 function num(value: unknown, fallback: number, minimum = 0): number {
   const parsed = Number(value)
@@ -268,7 +287,7 @@ export function normalizeHeaders(raw: unknown): Record<string, string> {
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof key !== 'string' || key.trim() === '') continue
     if (typeof value !== 'string' && typeof value !== 'number') continue
-    out[key.trim()] = String(value)
+    out[key.trim()] = expandEnv(value)
   }
   return out
 }
@@ -284,8 +303,12 @@ export function normalizeTargets(raw: unknown, fallbackPriority = 3): NotifyTarg
   for (const entry of raw) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
     const record = entry as Record<string, unknown>
-    const url = typeof record.url === 'string' ? record.url.trim() : ''
-    const token = typeof record.token === 'string' ? record.token.trim() : ''
+    let url = typeof record.url === 'string' ? expandEnv(record.url).trim() : ''
+    let token = typeof record.token === 'string' ? expandEnv(record.token).trim() : ''
+    // `urlEnv` / `tokenEnv` name the variable outright; they win over the
+    // literal reference form and keep per-target secrets out of the patch file.
+    if (typeof record.urlEnv === 'string' && record.urlEnv.trim() !== '') url = envValue(record.urlEnv.trim())
+    if (typeof record.tokenEnv === 'string' && record.tokenEnv.trim() !== '') token = envValue(record.tokenEnv.trim())
     if (!url && !token) continue
     out.push({
       name: typeof record.name === 'string' && record.name.trim() !== ''
@@ -318,12 +341,12 @@ export function normalizeOptions(config: NotifyConfig | undefined): Options {
   const options: Options = {
     enabled: bool(value<boolean>('enabled'), DEFAULTS.enabled),
     transport: value<string>('transport') === 'onebot' ? 'onebot' : 'gotify',
-    endpoint: str(value<string>('endpoint'), DEFAULTS.endpoint),
-    token: str(value<string>('token'), DEFAULTS.token),
+    endpoint: str(expandEnv(value<string>('endpoint')), DEFAULTS.endpoint),
+    token: str(expandEnv(value<string>('token')), DEFAULTS.token),
     targetType: value<string>('targetType') === 'group' ? 'group' : 'private',
-    targetId: str(value<string>('targetId'), DEFAULTS.targetId),
-    gotifyUrl: str(value<string>('gotifyUrl'), DEFAULTS.gotifyUrl),
-    gotifyToken: str(value<string>('gotifyToken'), DEFAULTS.gotifyToken),
+    targetId: str(expandEnv(value<string>('targetId')), DEFAULTS.targetId),
+    gotifyUrl: str(expandEnv(value<string>('gotifyUrl')), DEFAULTS.gotifyUrl),
+    gotifyToken: str(expandEnv(value<string>('gotifyToken')), DEFAULTS.gotifyToken),
     gotifyPriority: num(value<number>('gotifyPriority'), DEFAULTS.gotifyPriority),
     gotifyHeaders: normalizeHeaders(value<unknown>('gotifyHeaders')),
     targets: normalizeTargets(value<unknown>('targets'), num(value<number>('gotifyPriority'), DEFAULTS.gotifyPriority)),
