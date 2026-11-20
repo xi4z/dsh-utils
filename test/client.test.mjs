@@ -145,14 +145,54 @@ function checkbox(tree, label) {
   return control
 }
 
+/** A fetch-shaped response body for the skills panel tests. */
+function jsonResponse(body, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+  }
+}
+
+/** Let the panel's pending fetch settle, then re-render from the component root. */
+async function settle(page, props = {}) {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  return render(createElement(page, props))
+}
+
+/** The switch input of one skill row in the panel. */
+function skillSwitch(tree, name) {
+  const [input] = collect(tree, (node) => node.type === 'input' && node.props['data-skill'] === name)
+  assert.ok(input, `switch for "${name}" is rendered`)
+  return input
+}
+
 // ------------------------------------------------------------- host doubles --
 
-function fakeForm(initialValue, { status = 'ready', writable = true, revision = 7 } = {}) {
+function fakeForm(initialValue, { status = 'ready', writable = true, revision = 7, setResult = true, onSet } = {}) {
   const calls = []
+  const writes = []
+  const listeners = new Set()
   let value = initialValue
   const form = {
     calls,
+    writes,
     getSnapshot: () => ({ status, writable, value, revision }),
+    subscribe: (listener) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    set: async (field, next) => {
+      writes.push({ field, value: next })
+      if (onSet !== undefined) {
+        const accepted = await onSet(field, next)
+        if (accepted === false) return false
+      }
+      if (setResult === false) return false
+      value = { ...value, [field]: next }
+      for (const listener of listeners) listener()
+      return true
+    },
     mutate: async (ops, at) => {
       calls.push({ ops, revision: at })
       value = { ...value }
@@ -191,7 +231,7 @@ const NOTIFY_VALUE = {
   approvalTemplate: '',
 }
 
-function fakeCtx({ served = ['skill-recursive', 'dsh-approval-policy', 'dsh-notify'], skillValue, approvalValue, notifyValue, skillOptions, approvalOptions, notifyOptions } = {}) {
+function fakeCtx({ served = ['utils-main', 'dsh-approval-policy', 'dsh-notify', 'dsh-skill-panel', 'dsh-workbench'], skillValue, approvalValue, notifyValue, panelValue, workbenchValue, skillOptions, approvalOptions, notifyOptions, panelOptions, workbenchOptions } = {}) {
   const skillForm = fakeForm(skillValue ?? {
     minDepth: 1,
     maxDepth: 8,
@@ -213,11 +253,28 @@ function fakeCtx({ served = ['skill-recursive', 'dsh-approval-policy', 'dsh-noti
     autoReviewContent: true,
   }, approvalOptions)
   const notifyForm = fakeForm(notifyValue === undefined ? { ...NOTIFY_VALUE } : notifyValue, notifyOptions)
+  const panelForm = fakeForm(panelValue ?? { disabledSkills: [] }, panelOptions)
+  const workbenchForm = fakeForm(workbenchValue ?? {
+    maxBytes: 524288,
+    presetDirs: [],
+    extraAgentsFiles: [],
+    scanNestedAgents: false,
+    nestedDepth: 3,
+    defaultRepoUrl: 'https://github.com/xi4z/skills',
+    defaultBranch: 'Agent',
+  }, workbenchOptions)
   const registrations = []
+  const tabTypes = []
   const effects = []
   const ctx = {
     configForms: {
-      get: (namespace) => (namespace === 'skill-recursive' ? skillForm : namespace === 'dsh-notify' ? notifyForm : approvalForm),
+      get: (namespace) => {
+        if (namespace === 'utils-main') return skillForm
+        if (namespace === 'dsh-notify') return notifyForm
+        if (namespace === 'dsh-skill-panel') return panelForm
+        if (namespace === 'dsh-workbench') return workbenchForm
+        return approvalForm
+      },
       whileServed: (namespaces, register) => {
         const servedSet = new Set(served)
         const active = namespaces.some((namespace) => servedSet.has(namespace))
@@ -234,13 +291,19 @@ function fakeCtx({ served = ['skill-recursive', 'dsh-approval-policy', 'dsh-noti
       },
       inject: (_key, callback) => callback(),
     },
+    sidebarRightTabs: {
+      register: (definition) => {
+        tabTypes.push(definition)
+        return () => {}
+      },
+    },
     effect: (execute, label) => {
       const cleanup = execute()
       effects.push({ execute: () => cleanup, label })
       return cleanup
     },
   }
-  return { ctx, skillForm, approvalForm, notifyForm, registrations, effects }
+  return { ctx, skillForm, approvalForm, notifyForm, panelForm, workbenchForm, registrations, tabTypes, effects }
 }
 
 /** Load the browser half and mount it against the fake host. */
@@ -261,7 +324,7 @@ async function mountClient(options) {
   await import(modulePath.href)
   assert.equal(loaded.length, 1, 'the bundle registers exactly one client module')
   const definition = loaded[0]
-  assert.equal(definition.id, 'dsh-utils')
+  assert.equal(definition.id, '@xi4z/dsh-utils')
   const plugin = definition.factory((specifier) => {
     if (specifier === 'react') return React
     throw new Error(`unexpected client module request: ${specifier}`)
@@ -276,29 +339,41 @@ async function mountClient(options) {
 test('the client half registers one configuration page per mounted row', async () => {
   const { plugin, registrations } = await mountClient()
 
-  assert.deepEqual(plugin.inject, ['slots', 'configForms'])
-  const keys = registrations.map(({ options }) => `${options.name}:${options.key}`).sort()
+  assert.deepEqual(plugin.inject, ['slots', 'configForms', 'sidebarRightTabs'])
+  const keys = registrations
+    .filter(({ options }) => options.name === 'plugins.row.config')
+    .map(({ options }) => `${options.name}:${options.key}`)
+    .sort()
   assert.deepEqual(keys, [
-    'plugins.row.config:dsh-utils#dsh-approval-policy',
-    'plugins.row.config:dsh-utils#dsh-notify',
-    'plugins.row.config:dsh-utils#skill-recursive',
+    'plugins.row.config:@xi4z/dsh-utils#dsh-approval-policy',
+    'plugins.row.config:@xi4z/dsh-utils#dsh-notify',
+    'plugins.row.config:@xi4z/dsh-utils#dsh-skill-panel',
+    'plugins.row.config:@xi4z/dsh-utils#dsh-workbench',
+    'plugins.row.config:@xi4z/dsh-utils#utils-main',
   ])
 })
 
 test('registration follows the namespaces the Host serves', async () => {
-  const { registrations } = await mountClient({ served: ['skill-recursive'] })
-  const keys = registrations.map(({ options }) => `${options.name}:${options.key}`).sort()
-  assert.deepEqual(keys, ['plugins.row.config:dsh-utils#skill-recursive'])
+  const { registrations } = await mountClient({ served: ['utils-main'] })
+  const keys = registrations
+    .filter(({ options }) => options.name === 'plugins.row.config')
+    .map(({ options }) => `${options.name}:${options.key}`)
+    .sort()
+  assert.deepEqual(keys, ['plugins.row.config:@xi4z/dsh-utils#utils-main'])
 })
 
-test('a served-none deployment registers nothing', async () => {
+test('a served-none deployment registers no row configuration page', async () => {
   const { registrations } = await mountClient({ served: [] })
-  assert.deepEqual(registrations, [])
+  const keys = registrations
+    .filter(({ options }) => options.name === 'plugins.row.config')
+    .map(({ options }) => options.key)
+    .sort()
+  assert.deepEqual(keys, [])
 })
 
 test('skill page: initial draft reflects the Host values and saving writes only the changed field', async () => {
   const { registrations, skillForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === 'dsh-utils#skill-recursive').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
 
   let tree = render(createElement(page, {}))
   assert.equal(textOf(tree).includes('递归技能发现'), true)
@@ -315,7 +390,7 @@ test('skill page: initial draft reflects the Host values and saving writes only 
 
 test('skill page: invalid and contradictory numbers block the save with a message', async () => {
   const { registrations, skillForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === 'dsh-utils#skill-recursive').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
 
   let tree = render(createElement(page, {}))
   fieldControl(tree, '最小深度').props.onChange({ target: { value: '9' } })
@@ -339,7 +414,7 @@ test('skill page: invalid and contradictory numbers block the save with a messag
 
 test('skill page: list fields split into trimmed, non-empty lines', async () => {
   const { registrations, skillForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === 'dsh-utils#skill-recursive').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
 
   let tree = render(createElement(page, {}))
   fieldControl(tree, '忽略的目录名').props.onChange({ target: { value: '.git\n\n  node_modules  \n' } })
@@ -351,7 +426,7 @@ test('skill page: list fields split into trimmed, non-empty lines', async () => 
 
 test('skill page: toggling the watch switch writes a boolean', async () => {
   const { registrations, skillForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === 'dsh-utils#skill-recursive').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
 
   let tree = render(createElement(page, {}))
   checkbox(tree, '监听变化').props.onChange({ target: { checked: false } })
@@ -363,7 +438,7 @@ test('skill page: toggling the watch switch writes a boolean', async () => {
 
 test('approval page: origins are a checkbox set stored in canonical order', async () => {
   const { registrations, approvalForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === 'dsh-utils#dsh-approval-policy').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-approval-policy').component
 
   let tree = render(createElement(page, {}))
   checkbox(tree, 'cron 任务').props.onChange({ target: { checked: true } })
@@ -383,7 +458,7 @@ test('approval page: origins are a checkbox set stored in canonical order', asyn
 
 test('approval page: the schema bounds are enforced before the Host sees the write', async () => {
   const { registrations, approvalForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === 'dsh-utils#dsh-approval-policy').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-approval-policy').component
 
   let tree = render(createElement(page, {}))
   fieldControl(tree, '应答窗口（秒）').props.onChange({ target: { value: '86401' } })
@@ -397,7 +472,7 @@ test('approval page: the schema bounds are enforced before the Host sees the wri
 
 test('an unwritable form renders read-only and cannot save', async () => {
   const { registrations } = await mountClient({ skillOptions: { writable: false } })
-  const page = registrations.find(({ options }) => options.key === 'dsh-utils#skill-recursive').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
 
   const tree = render(createElement(page, {}))
   assert.equal(fieldControl(tree, '最小深度').props.disabled, true)
@@ -407,35 +482,41 @@ test('an unwritable form renders read-only and cannot save', async () => {
 
 test('a loading or unavailable namespace says so instead of rendering empty inputs', async () => {
   const unavailable = await mountClient({ skillOptions: { status: 'unavailable' } })
-  const unavailablePage = unavailable.registrations.find(({ options }) => options.key === 'dsh-utils#skill-recursive').component
+  const unavailablePage = unavailable.registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
   assert.equal(textOf(render(createElement(unavailablePage, {}))).includes('没有向浏览器暴露'), true)
 
   const loading = await mountClient({ skillOptions: { status: 'loading' } })
-  const loadingPage = loading.registrations.find(({ options }) => options.key === 'dsh-utils#skill-recursive').component
+  const loadingPage = loading.registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
   assert.equal(textOf(render(createElement(loadingPage, {}))).includes('正在读取配置'), true)
 })
 
 test('the plugin disposes the forms it owns through an effect', async () => {
-  const { effects, skillForm, approvalForm, notifyForm } = await mountClient()
+  const { effects, skillForm, approvalForm, notifyForm, panelForm, workbenchForm } = await mountClient()
   let skillDisposed = false
   let approvalDisposed = false
   let notifyDisposed = false
+  let panelDisposed = false
+  let markdownDisposed = false
   skillForm.dispose = () => { skillDisposed = true }
   approvalForm.dispose = () => { approvalDisposed = true }
   notifyForm.dispose = () => { notifyDisposed = true }
+  panelForm.dispose = () => { panelDisposed = true }
+  workbenchForm.dispose = () => { markdownDisposed = true }
   const formsEffect = effects.find((entry) => entry.label === 'dsh-utils: configuration forms')
   assert.ok(formsEffect, 'the forms effect is registered')
   formsEffect.execute()()
   assert.equal(skillDisposed, true)
   assert.equal(approvalDisposed, true)
   assert.equal(notifyDisposed, true)
+  assert.equal(panelDisposed, true)
+  assert.equal(markdownDisposed, true)
 })
 
 // ------------------------------------------------------------------ notify --
 
 test('notify page: reasons are a checkbox set stored in canonical order', async () => {
   const { registrations, notifyForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === 'dsh-utils#dsh-notify').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-notify').component
 
   let tree = render(createElement(page, {}))
   checkbox(tree, '出错').props.onChange({ target: { checked: false } })
@@ -451,7 +532,7 @@ test('notify page: reasons are a checkbox set stored in canonical order', async 
 
 test('notify page: the targets JSON field accepts an array of targets', async () => {
   const { registrations, notifyForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === 'dsh-utils#dsh-notify').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-notify').component
 
   let tree = render(createElement(page, {}))
   fieldControl(tree, '多目标').props.onChange({
@@ -469,7 +550,7 @@ test('notify page: the targets JSON field accepts an array of targets', async ()
 
 test('notify page: malformed JSON blocks the save with a message', async () => {
   const { registrations, notifyForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === 'dsh-utils#dsh-notify').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-notify').component
 
   let tree = render(createElement(page, {}))
   fieldControl(tree, '附加请求头').props.onChange({ target: { value: '{nope}' } })
@@ -483,7 +564,7 @@ test('notify page: malformed JSON blocks the save with a message', async () => {
 
 test('notify page: templates keep their newlines and an unchanged save writes nothing', async () => {
   const { registrations, notifyForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === 'dsh-utils#dsh-notify').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-notify').component
 
   let tree = render(createElement(page, {}))
   await clickSave(tree)
@@ -500,7 +581,7 @@ test('notify page: templates keep their newlines and an unchanged save writes no
 
 test('notify page: the dry-run switch and the text fields save as typed', async () => {
   const { registrations, notifyForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === 'dsh-utils#dsh-notify').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-notify').component
 
   let tree = render(createElement(page, {}))
   checkbox(tree, '只记日志').props.onChange({ target: { checked: false } })
@@ -513,4 +594,528 @@ test('notify page: the dry-run switch and the text fields save as typed', async 
     { op: 'set', path: ['dryRun'], value: false },
     { op: 'set', path: ['gotifyUrl'], value: 'https://notify.example.org' },
   ])
+})
+
+// ----------------------------------------------------------------- skills --
+
+const PANEL_SKILLS = [
+  {
+    name: 'caveman', description: '压缩回答', source: 'user-dsh', provider: 'filesystem',
+    path: '/root/core/skills/caveman/SKILL.md', modelInvocable: true, userInvocable: true, enabled: true,
+  },
+  {
+    name: 'manual-only', description: '仅手动技能', source: 'project', provider: 'filesystem',
+    path: '/root/core/.dsh/skills/manual-only/SKILL.md', modelInvocable: false, userInvocable: true, enabled: false,
+  },
+]
+
+const PANEL_BODY = {
+  sessionId: 'sess-1', cwd: '/root/core', complete: true, skills: PANEL_SKILLS, disabledSkills: [],
+}
+
+function clearPanelGlobals() {
+  delete globalThis.fetch
+  delete globalThis.document
+}
+
+/** Mount the skill panel row page (the sidebar tab was merged into Utils). */
+async function mountSidebarPanel({ body = PANEL_BODY, status = 200, handler, panelOptions } = {}) {
+  const mounted = await mountClient({ panelOptions })
+  const page = mounted.registrations.find(({ options }) => options.name === 'plugins.row.config' && options.key === '@xi4z/dsh-utils#dsh-skill-panel').component
+  const requested = []
+  globalThis.document = { baseURI: 'http://127.0.0.1:3080/' }
+  globalThis.fetch = async (url) => {
+    requested.push(String(url))
+    if (handler !== undefined) return handler(String(url), requested.length)
+    return jsonResponse(body, status)
+  }
+  const props = {}
+  let tree = render(createElement(page, props))
+  tree = await settle(page, props)
+  return { ...mounted, page, props, requested, tree }
+}
+
+test('the right-sidebar type and its keyed body are registered together', async () => {
+  const { tabTypes, registrations } = await mountClient()
+
+  assert.equal(tabTypes.length, 1)
+  const definition = tabTypes.find((tab) => tab.id === 'utils-workbench')
+  assert.ok(definition, 'the Utils tab type is registered')
+  assert.equal(definition.kind, 'utils-workbench')
+  assert.equal(definition.title(), 'Utils')
+  assert.equal(definition.guide.length, 1)
+  assert.equal(definition.guide[0].id, 'utils-workbench')
+  assert.equal(definition.guide[0].order, 30)
+  assert.equal(definition.guide[0].title(), 'Utils')
+  assert.equal(typeof definition.guide[0].description(), 'string')
+
+  const body = registrations.find(({ options }) => options.name === 'sidebar.right.pane.tab' && options.key === 'utils-workbench')
+  assert.ok(body, 'the keyed Utils pane body is registered')
+  assert.equal(body.options.key, 'utils-workbench')
+})
+
+test('skills panel: lists the session catalog with counts and the session query', async () => {
+  const { tree, requested } = await mountSidebarPanel()
+  try {
+    assert.equal(requested.length, 1)
+    const url = new URL(requested[0])
+    assert.equal(url.pathname, '/api/dsh-utils/skill-panel/list')
+    assert.equal(url.searchParams.has('sessionId'), false)
+
+    const text = textOf(tree)
+    assert.match(text, /共 2 个 · 模型可见 1/)
+    assert.match(text, /工作目录：\/root\/core/)
+    assert.match(text, /caveman/)
+    assert.match(text, /压缩回答/)
+    assert.match(text, /manual-only/)
+    assert.match(text, /仅手动/)
+    assert.match(text, /仍可用“\/名称”手动加载/)
+
+    // Only model-invocable skills carry a live switch; the rest are manual-only.
+    assert.equal(skillSwitch(tree, 'caveman').props.checked, true)
+    assert.equal(skillSwitch(tree, 'caveman').props.disabled, false)
+    assert.equal(skillSwitch(tree, 'manual-only').props.checked, false)
+    assert.equal(skillSwitch(tree, 'manual-only').props.disabled, true)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('skills panel: a switch writes the sorted disabled list and updates the count', async () => {
+  const { tree: initial, panelForm, page, props } = await mountSidebarPanel()
+  try {
+    let tree = initial
+    skillSwitch(tree, 'caveman').props.onChange({ target: { checked: false } })
+    tree = await settle(page, props)
+    assert.deepEqual(panelForm.writes, [{ field: 'disabledSkills', value: ['caveman'] }])
+    assert.equal(skillSwitch(tree, 'caveman').props.checked, false)
+    assert.match(textOf(tree), /模型可见 0/)
+
+    skillSwitch(tree, 'caveman').props.onChange({ target: { checked: true } })
+    tree = await settle(page, props)
+    assert.deepEqual(panelForm.writes[1], { field: 'disabledSkills', value: [] })
+    assert.equal(skillSwitch(tree, 'caveman').props.checked, true)
+    assert.match(textOf(tree), /模型可见 1/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('skills panel: a refused write rolls the switch back with a message', async () => {
+  const { tree: initial, panelForm, page, props } = await mountSidebarPanel({ panelOptions: { setResult: false } })
+  try {
+    let tree = initial
+    assert.equal(skillSwitch(tree, 'caveman').props.checked, true)
+    skillSwitch(tree, 'caveman').props.onChange({ target: { checked: false } })
+    tree = await settle(page, props)
+    assert.deepEqual(panelForm.writes, [{ field: 'disabledSkills', value: ['caveman'] }])
+    assert.equal(skillSwitch(tree, 'caveman').props.checked, true)
+    assert.match(textOf(tree), /宿主拒绝了这次修改/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('skills panel: a throwing write rolls back and surfaces the failure', async () => {
+  const { tree: initial, page, props } = await mountSidebarPanel({
+    panelOptions: {
+      onSet: () => {
+        throw new Error('写入失败：连接中断')
+      },
+    },
+  })
+  try {
+    let tree = initial
+    skillSwitch(tree, 'caveman').props.onChange({ target: { checked: false } })
+    tree = await settle(page, props)
+    assert.equal(skillSwitch(tree, 'caveman').props.checked, true)
+    assert.match(textOf(tree), /连接中断/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('skills panel: a 500 shows the Host reason and retry fetches again', async () => {
+  const { tree: initial, requested, page, props } = await mountSidebarPanel({
+    handler: (_url, index) => (index === 1
+      ? jsonResponse({ error: 'registry unavailable' }, 500)
+      : jsonResponse(PANEL_BODY)),
+  })
+  try {
+    let tree = initial
+    assert.equal(requested.length, 1)
+    assert.match(textOf(tree), /HTTP 500/)
+    assert.match(textOf(tree), /registry unavailable/)
+
+    const [retry] = collect(tree, (node) => node.type === 'button' && textOf(node).includes('重试'))
+    assert.ok(retry, 'a retry button is rendered')
+    retry.props.onClick()
+    tree = await settle(page, props) // starts the second request
+    tree = await settle(page, props) // renders its answer
+    assert.equal(requested.length, 2)
+    assert.match(textOf(tree), /caveman/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('skills panel: 404 explains that the Host has not mounted the panel yet', async () => {
+  const missing = await mountSidebarPanel({ body: { error: 'not found' }, status: 404 })
+  try {
+    assert.match(textOf(missing.tree), /HTTP 404/)
+    assert.match(textOf(missing.tree), /重启 dsh web/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('skills panel: 401 and transport failures read as actionable messages', async () => {
+  const unauthorized = await mountSidebarPanel({ body: { error: 'unauthorized' }, status: 401 })
+  try {
+    assert.match(textOf(unauthorized.tree), /登录状态已过期/)
+  } finally {
+    clearPanelGlobals()
+  }
+
+  const offline = await mountSidebarPanel({
+    handler: () => {
+      throw new TypeError('fetch failed')
+    },
+  })
+  try {
+    assert.match(textOf(offline.tree), /无法连接宿主服务/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('skills panel: the row page mounts the same panel without a session query', async () => {
+  const mounted = await mountClient()
+  const page = mounted.registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-skill-panel').component
+  const requested = []
+  globalThis.document = { baseURI: 'http://127.0.0.1:3080/' }
+  globalThis.fetch = async (url) => {
+    requested.push(String(url))
+    return jsonResponse(PANEL_BODY)
+  }
+  try {
+    let tree = render(createElement(page, {}))
+    tree = await settle(page, {})
+    const url = new URL(requested[0])
+    assert.equal(url.pathname, '/api/dsh-utils/skill-panel/list')
+    assert.equal(url.searchParams.has('sessionId'), false)
+    assert.match(textOf(tree), /共 2 个 · 模型可见 1/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('skills panel: an empty catalog says so instead of rendering a bare list', async () => {
+  const { tree } = await mountSidebarPanel({
+    body: { sessionId: 'sess-1', cwd: '/root/core', complete: true, skills: [], disabledSkills: [] },
+  })
+  try {
+    assert.match(textOf(tree), /当前没有可读取的技能/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+
+// ----------------------------------------------------------- workbench --
+
+const WB_LIST = {
+  sessionId: 'sess-1',
+  cwd: '/root/core',
+  sessionPreset: 'demo',
+  defaultPresetId: 'demo',
+  presets: [
+    {
+      id: 'demo',
+      name: 'Demo preset',
+      description: '演示预设',
+      path: '/root/.dsh/.agent-presets/demo',
+      registered: true,
+      broken: '',
+      skills: [
+        { name: 'alpha', description: 'alpha skill', path: 'skills/alpha/SKILL.md', enabled: true, size: 20, mtimeMs: 1000 },
+        { name: 'beta', description: 'beta skill', path: 'skills/beta/SKILL.md.disabled', enabled: false, size: 20, mtimeMs: 1000 },
+      ],
+      agents: {
+        id: 'preset:ZGVtby1wcmVzZXQ:AGENTS.md',
+        label: 'AGENTS.md',
+        path: '/root/.dsh/.agent-presets/demo/AGENTS.md',
+        presetId: 'demo',
+        kind: 'agents',
+        exists: false,
+        editable: true,
+        size: 0,
+        mtimeMs: null,
+      },
+    },
+    {
+      id: 'other',
+      name: 'Other',
+      description: '',
+      path: '/root/.dsh/.agent-presets/other',
+      skills: [],
+      agents: {
+        id: 'preset:b3RoZXI:AGENTS.md',
+        label: 'AGENTS.md',
+        path: '/root/.dsh/.agent-presets/other/AGENTS.md',
+        presetId: 'other',
+        kind: 'agents',
+        exists: false,
+        editable: true,
+        size: 0,
+        mtimeMs: null,
+      },
+    },
+  ],
+  global: {
+    id: '__global__',
+    name: '全局 / 项目',
+    files: [
+      {
+        id: 'global:Z2xvYmFs',
+        label: 'AGENTS.md',
+        path: '/root/.dsh/AGENTS.md',
+        presetId: '__global__',
+        kind: 'global',
+        scope: '用户全局 · $DSH_HOME',
+        exists: true,
+        editable: true,
+        size: 12,
+        mtimeMs: 1000,
+      },
+    ],
+  },
+}
+
+const WB_FILES = {
+  presetId: 'demo',
+  preset: WB_LIST.presets[0],
+  files: [
+    WB_LIST.presets[0].agents,
+    {
+      id: 'preset:ZGVtby1wcmVzZXQ:c2tpbGxzL2FscGhhL1NLSUxMLm1k',
+      label: 'skills/alpha/SKILL.md',
+      path: '/root/.dsh/.agent-presets/demo/skills/alpha/SKILL.md',
+      presetId: 'demo',
+      kind: 'skill',
+      exists: true,
+      editable: true,
+      size: 20,
+      mtimeMs: 1000,
+    },
+    {
+      id: 'preset:ZGVtby1wcmVzZXQ:c2tpbGxzL2JldGEvU0tJTEwubWQuZGlzYWJsZWQ',
+      label: 'skills/beta/SKILL.md.disabled',
+      path: '/root/.dsh/.agent-presets/demo/skills/beta/SKILL.md.disabled',
+      presetId: 'demo',
+      kind: 'skill',
+      exists: true,
+      editable: true,
+      size: 20,
+      mtimeMs: 1000,
+    },
+    {
+      id: 'preset:ZGVtby1wcmVzZXQ:bm90ZXMubWQ',
+      label: 'notes.md',
+      path: '/root/.dsh/.agent-presets/demo/notes.md',
+      presetId: 'demo',
+      kind: 'reference',
+      exists: true,
+      editable: true,
+      size: 10,
+      mtimeMs: 1000,
+    },
+  ],
+}
+
+const WB_REPO = {
+  state: {
+    repoUrl: 'https://github.com/xi4z/skills',
+    branch: 'Agent',
+    targetSubdir: 'skills-repo',
+    keyPath: '',
+    recurseSubmodules: true,
+    lastSync: null,
+  },
+  target: '/root/.dsh/.agent-presets/demo/skills/skills-repo',
+  status: { exists: false, isRepo: false, branch: null, commit: null, dirty: false, skills: 0 },
+  key: { source: 'none', hasStoredKey: false },
+}
+
+function wbFileOf(id) {
+  return WB_FILES.files.find((file) => file.id === id) ?? WB_FILES.files[0]
+}
+
+/** Mount the Utils sidebar body with a route-aware fake fetch. */
+async function mountWorkbench({ handler } = {}) {
+  const mounted = await mountClient()
+  const page = mounted.registrations.find(
+    ({ options }) => options.name === 'sidebar.right.pane.tab' && options.key === 'utils-workbench',
+  ).component
+  assert.ok(page, 'the Utils pane body is registered')
+  const requested = []
+  globalThis.document = { baseURI: 'http://127.0.0.1:3080/' }
+  globalThis.fetch = async (url, init) => {
+    const entry = {
+      url: String(url),
+      path: new URL(String(url)).pathname,
+      method: (init ?? {}).method ?? 'GET',
+      body: typeof (init ?? {}).body === 'string' ? JSON.parse(init.body) : null,
+    }
+    requested.push(entry)
+    if (handler !== undefined) return handler(entry, requested.length)
+    if (entry.path.endsWith('/list')) return jsonResponse(WB_LIST)
+    if (entry.path.endsWith('/files')) return jsonResponse(WB_FILES)
+    if (entry.path.endsWith('/repo')) {
+      if (entry.method === 'POST') return jsonResponse({ ...WB_REPO, state: { ...WB_REPO.state, ...entry.body } })
+      return jsonResponse(WB_REPO)
+    }
+    if (entry.path.endsWith('/key')) return jsonResponse({ key: { source: entry.body.key === '' ? 'none' : 'stored', hasStoredKey: entry.body.key !== '' }, state: WB_REPO.state })
+    if (entry.path.endsWith('/sync')) return jsonResponse({ ...WB_REPO, state: { ...WB_REPO.state, lastSync: { at: '2026-11-20T00:00:00.000Z', ok: true, commit: 'abcdef1234567890', skills: 2, message: '已 clone 分支 Agent' } } })
+    if (entry.path.endsWith('/skill')) {
+      const file = WB_FILES.files.find((candidate) => candidate.label === entry.body.path) ?? WB_FILES.files[1]
+      return jsonResponse({ skill: { name: file.label.includes('alpha') ? 'alpha' : 'beta', description: '', path: entry.body.enabled ? file.label.replace(/\.disabled$/, '') : file.label.replace(/\.md$/, '.md.disabled'), enabled: entry.body.enabled, size: 20, mtimeMs: 1000 } })
+    }
+    if (entry.path.endsWith('/file')) {
+      if (entry.method === 'POST') {
+        const file = wbFileOf(entry.body.id)
+        return jsonResponse({ file: { ...file, exists: true, size: entry.body.content.length, mtimeMs: 2000 }, bytes: entry.body.content.length })
+      }
+      const id = new URL(entry.url).searchParams.get('id')
+      const file = wbFileOf(id)
+      const content = entry.body === null && id !== WB_FILES.files[0].id ? '# skill\n' : ''
+      return jsonResponse({ file, content })
+    }
+    return jsonResponse({ error: 'unexpected route' }, 500)
+  }
+  const props = { sessionId: 'sess-1' }
+  let tree = render(createElement(page, props))
+  for (let pass = 0; pass < 6; pass += 1) tree = await settle(page, props)
+  return { ...mounted, page, props, tree, requested }
+}
+
+/** The input/textarea/select inside a dswb label row. */
+function wbField(tree, label) {
+  const labels = collect(tree, (node) => node.type === 'label'
+    && Array.isArray(node.children)
+    && node.children.some((child) => child !== null && typeof child === 'object'
+      && child.type === 'span' && child.props?.className === 'dswb-label' && textOf(child) === label))
+  assert.ok(labels.length > 0, 'field ' + label + ' is rendered')
+  const [control] = collect(labels[0], (node) => ['input', 'textarea', 'select'].includes(node.type))
+  assert.ok(control, 'field ' + label + ' carries a control')
+  return control
+}
+
+/** Click the first button whose text includes the given label. */
+function wbButton(tree, label) {
+  const [button] = collect(tree, (node) => node.type === 'button' && textOf(node).includes(label))
+  assert.ok(button, 'button ' + label + ' is rendered')
+  return button
+}
+
+test('utils panel: lists presets, skills, and defaults to the session preset', async () => {
+  const { tree, requested } = await mountWorkbench()
+  try {
+    assert.equal(requested.some((entry) => entry.path.endsWith('/list')), true)
+    assert.equal(requested.some((entry) => entry.path.endsWith('/files') && entry.url.includes('presetId=demo')), true)
+    assert.equal(requested.some((entry) => entry.path.endsWith('/repo') && entry.url.includes('presetId=demo')), true)
+    const text = textOf(tree)
+    assert.match(text, /Utils/)
+    assert.match(text, /Demo preset/)
+    assert.match(text, /alpha/)
+    assert.match(text, /beta/)
+    assert.match(text, /已启用/)
+    assert.match(text, /已关闭/)
+    assert.match(text, /技能 · 1\/2/)
+    assert.match(text, /已注册到 DSH/)
+    const [select] = collect(tree, (node) => node.type === 'select')
+    assert.equal(select.props.value, 'demo')
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('utils panel: toggling a skill posts the preset and path, then refreshes', async () => {
+  const { tree, page, props, requested } = await mountWorkbench()
+  try {
+    wbButton(tree, '关闭').props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    let next = render(createElement(page, props))
+    next = await settle(page, props)
+    const toggle = requested.find((entry) => entry.path.endsWith('/skill'))
+    assert.ok(toggle, 'a skill toggle request was sent')
+    assert.deepEqual(toggle.body, { presetId: 'demo', path: 'skills/alpha/SKILL.md', enabled: false })
+    assert.match(textOf(next), /已关闭 alpha/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('utils panel: edits and saves the selected Markdown file', async () => {
+  const { tree, page, props, requested } = await mountWorkbench()
+  try {
+    wbButton(tree, 'Markdown').props.onClick()
+    let next = render(createElement(page, props))
+    next = await settle(page, props)
+    const [editor] = collect(next, (node) => node.props?.className === 'dswb-editor')
+    assert.ok(editor, 'the markdown editor is rendered')
+    assert.equal(editor.props.value, '')
+    editor.props.onChange({ target: { value: '# preset agents\n' } })
+    next = render(createElement(page, props))
+    const save = wbButton(next, '保存')
+    await save.props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    next = render(createElement(page, props))
+    const write = requested.find((entry) => entry.path.endsWith('/file') && entry.method === 'POST')
+    assert.ok(write, 'a file write was sent')
+    assert.equal(write.body.content, '# preset agents\n')
+    assert.match(textOf(next), /已保存/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('utils panel: repository tab saves settings and syncs', async () => {
+  const { tree, page, props, requested } = await mountWorkbench()
+  try {
+    wbButton(tree, '技能仓库').props.onClick()
+    let next = render(createElement(page, props))
+    next = await settle(page, props)
+    assert.equal(wbField(next, '仓库地址').props.value, 'https://github.com/xi4z/skills')
+    assert.equal(wbField(next, '分支').props.value, 'Agent')
+
+    wbField(next, '分支').props.onChange({ target: { value: 'main' } })
+    next = render(createElement(page, props))
+    await wbButton(next, '保存设置').props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    next = render(createElement(page, props))
+    const saved = requested.find((entry) => entry.path.endsWith('/repo') && entry.method === 'POST')
+    assert.ok(saved, 'a repo config write was sent')
+    assert.equal(saved.body.presetId, 'demo')
+    assert.equal(saved.body.branch, 'main')
+
+    wbButton(next, '同步（拉取）').props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    next = render(createElement(page, props))
+    assert.equal(requested.some((entry) => entry.path.endsWith('/sync') && entry.method === 'POST'), true)
+    assert.match(textOf(next), /已 clone 分支 Agent/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('utils panel: 404 explains that the workbench row is not mounted', async () => {
+  const { tree } = await mountWorkbench({ handler: () => jsonResponse({ error: 'not found' }, 404) })
+  try {
+    assert.match(textOf(tree), /HTTP 404/)
+    assert.match(textOf(tree), /dsh-workbench/)
+    assert.match(textOf(tree), /重启 dsh web/)
+  } finally {
+    clearPanelGlobals()
+  }
 })

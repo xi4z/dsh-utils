@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Harness Utilities",
-    "description": "One bundle, three components: recursive SKILL.md discovery in nested skill folders, an unattended approval gate that bounds approval requests before settling fail-closed, and turn-end / approval / question notifications pushed through a Gotify gateway."
+    "description": "One bundle, four components: recursive SKILL.md discovery, skill-repository sync and the browser UI in the root package, an unattended approval gate that bounds approval requests before settling fail-closed, turn-end / approval / question notifications pushed through a Gotify gateway, and a skill panel that lists and switches the skills the current session can read."
   }
 }

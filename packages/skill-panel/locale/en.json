@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Skill panel",
+    "description": "Lists the skills the current session can read and hides disabled skills from the model catalog, while manual /name invocation still works."
+  }
+}

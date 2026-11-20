@@ -1,13 +1,17 @@
 {
-  "name": "dsh-utils",
-  "version": "0.2.0",
-  "description": "DeepSeek Harness utility bundle: three components — recursive SKILL.md discovery in nested skill folders, an unattended approval gate that bounds approval requests and settles fail-closed, and turn-end/approval/question notifications through a Gotify gateway",
+  "name": "@xi4z/dsh-utils",
+  "version": "0.4.0",
+  "description": "DeepSeek Harness utility bundle whose root package carries the main component (recursive SKILL.md discovery, Git skill-repository sync, and the browser UI) plus four independently mounted sub-packages (unattended approval gate, session notifications, skill panel, preset workbench with .dsh shared-preset sync).",
   "keywords": [
     "dsh",
     "dsh-plugin",
     "dsh-bundle",
     "deepseek-harness",
     "skills",
+    "skill-panel",
+    "markdown",
+    "agents-md",
+    "preset-workbench",
     "skill-discovery",
     "approval",
     "unattended",
@@ -23,41 +27,33 @@
     "type": "git",
     "url": "git+https://github.com/xi4z/dsh-utils.git"
   },
+  "bugs": {
+    "url": "https://github.com/xi4z/dsh-utils/issues"
+  },
   "type": "module",
-  "main": "./lib/skill-recursive.js",
-  "types": "./lib/skill-recursive.d.ts",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
   "exports": {
     ".": {
-      "types": "./lib/skill-recursive.d.ts",
-      "import": "./lib/skill-recursive.js",
-      "default": "./lib/skill-recursive.js"
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js",
+      "default": "./lib/index.js"
     },
-    "./skill-recursive": {
-      "types": "./lib/skill-recursive.d.ts",
-      "import": "./lib/skill-recursive.js",
-      "default": "./lib/skill-recursive.js"
+    "./ui-host": {
+      "types": "./lib/ui-host.d.ts",
+      "import": "./lib/ui-host.js",
+      "default": "./lib/ui-host.js"
     },
-    "./skill-recursive/locale/*.json": "./locale/skill-recursive/*.json",
-    "./approval-policy": {
-      "types": "./lib/approval-policy.d.ts",
-      "import": "./lib/approval-policy.js",
-      "default": "./lib/approval-policy.js"
-    },
-    "./approval-policy/locale/*.json": "./locale/approval-policy/*.json",
-    "./notify": {
-      "types": "./lib/notify.d.ts",
-      "import": "./lib/notify.js",
-      "default": "./lib/notify.js"
-    },
-    "./notify/locale/*.json": "./locale/notify/*.json",
-    "./client": "./client.js",
-    "./icon": "./icon.svg",
+    "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*.json": "./locale/*.json",
-    "./package.json": "./package.json"
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json",
+    "./client": "./client.js"
   },
   "files": [
     "lib",
     "client.js",
+    "src",
     "cordis.patch.yml",
     "locale",
     "skills",
@@ -69,21 +65,26 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "check": "tsc --noEmit -p tsconfig.json",
-    "test": "npm run build && node --check client.js && node --test test/*.test.mjs"
+    "build": "tsc -p tsconfig.json && pnpm -r --filter \"./packages/*\" run build",
+    "check": "tsc --noEmit -p tsconfig.json && pnpm -r --filter \"./packages/*\" run check",
+    "test": "pnpm build && node --check client.js && node --test test/*.test.mjs && pnpm -r --filter \"./packages/*\" run test",
+    "publish:components": "pnpm -r --filter \"./packages/*\" publish --access public --no-git-checks",
+    "publish:bundle": "pnpm publish --access public --no-git-checks"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "~3.19.0"
+    "@deepseek-ai/schemastery": "~3.19.0",
+    "@xi4z/dsh-utils-approval-policy": "workspace:^",
+    "@xi4z/dsh-utils-workbench": "workspace:^",
+    "@xi4z/dsh-utils-notify": "workspace:^",
+    "@xi4z/dsh-utils-skill-panel": "workspace:^"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
-    "@deepseek-ai/dsh-agent": "0.2.2-rc.2",
-    "@deepseek-ai/dsh-llm": "0.2.2-rc.2",
     "@deepseek-ai/dsh-settings": "^0.2.2-rc.2",
     "@deepseek-ai/dsh-skill": "0.2.2-rc.2",
-    "@deepseek-ai/dsh-tools": "0.2.2-rc.2",
-    "@deepseek-ai/dsh-user-approval": "0.2.2-rc.2",
     "@types/node": "^24.0.0",
     "typescript": "~5.9.0"
   },
@@ -91,12 +92,15 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
+    "engines": {
+      "dsh": ">=0.2.2-rc.1 <0.4.0-0"
+    },
     "client": {
       "platform": "web",
       "inject": []
-    },
-    "engines": {
-      "dsh": ">=0.2.1-rc.5 <0.4.0-0"
     }
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

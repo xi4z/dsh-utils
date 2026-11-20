@@ -1,0 +1,57 @@
+{
+  "name": "@xi4z/dsh-utils-approval-policy",
+  "version": "0.3.0",
+  "description": "dsh-utils component: unattended approval gate that bounds approval requests and settles fail-closed.",
+  "license": "MIT",
+  "author": "xi4z",
+  "homepage": "https://github.com/xi4z/dsh-utils",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xi4z/dsh-utils.git",
+    "directory": "packages/approval-policy"
+  },
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js",
+      "default": "./lib/index.js"
+    },
+    "./locale/*.json": "./locale/*.json",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "locale",
+    "src"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "~3.19.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-agent": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-user-approval": "0.2.2-rc.2",
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,40 +1,76 @@
-# dsh-utils
+# @xi4z/dsh-utils
 
-一个包，三个组件。装一次，三条挂载项各自开关、各自配置。
+官方实验性插件的多包形态：根包 `@xi4z/dsh-utils` 既是 bundle 层（`cordis.patch.yml` + locale + icon），也是主组件 `utils-main` 与整个浏览器半侧的代码所在——主组件挂在包根，其余组件各自是 `packages/` 下的独立包。行 id 就是 settings 命名空间，保持稳定。
 
-| 组件 | 挂载项 id | 包内入口 | 作用 |
+| 组件 | 挂载项 id | 包 | 作用 |
 |---|---|---|---|
-| 递归技能发现 | `skill-recursive` | 子路径 `dsh-utils/skill-recursive` | 嵌套目录找 `SKILL.md`。内置提供方只读一层 |
-| 无人值守审批门控 | `dsh-approval-policy` | 子路径 `dsh-utils/approval-policy` | 给审批请求设应答窗口，超时 fail-closed |
-| 会话通知 | `dsh-notify` | 子路径 `dsh-utils/notify` | 会话结束/等授权/等回答时，经 Gotify 网关推送，带设备名 |
+| 递归技能发现 + 旧技能仓库路由（主组件） | `utils-main` | `@xi4z/dsh-utils`（包根） | 嵌套目录找 `SKILL.md`；保留旧的全局技能仓库 JSON 路由；`client.js` 提供全部配置页与右侧栏 Utils 面板 |
+| 无人值守审批门控 | `dsh-approval-policy` | `@xi4z/dsh-utils-approval-policy` | 给审批请求设应答窗口，超时 fail-closed |
+| 会话通知 | `dsh-notify` | `@xi4z/dsh-utils-notify` | 会话结束/等授权/等回答时，经 Gotify 网关推送，带设备名 |
+| 技能面板（宿主侧） | `dsh-skill-panel` | `@xi4z/dsh-utils-skill-panel` | 旧侧边栏卡片已并入 Utils；保留当前会话的模型可见性开关与配置页 |
+| Utils 工作台 | `dsh-workbench` | `@xi4z/dsh-utils-workbench` | 一个侧边栏面板按预设管理 skills、技能仓库与 AGENTS.md，并从技能仓库 `.dsh` 同步共享预设 |
 
-三条挂载项全走子路径。每个组件读自己 `locale` 的标题（递归Skill插件 / 无人值守审批门控 / 会话通知）。bundle 自己叫「Harness 工具集」。代价见下。
+根包的 `locale/{en,zh}.json` 同时是 bundle 展示名与 `utils-main` 行的标题（「Harness 工具集」）；其余组件包各自用自己的 locale 提供行标题（无人值守审批门控 / 会话通知 / 技能面板 / Utils 工作台）。`utils-main` 挂的就是根包自身（`name: '@xi4z/dsh-utils'`），所以 bundle 只需要这一个包就能工作；其他组件按包名挂载、可独立发布与停用。
 
 ### 关于配置界面
 
-DSH 客户端扫描器只从包根挂载行加载 `client.js`。包根行 = `name: dsh-utils`，无斜杠，未禁用。本 bundle 没有包根行。宿主不加载浏览器半侧，插件页没有每行配置表单。
+DSH 客户端扫描器从**包根挂载行**加载 `client.js`。根包自己声明 `dsh.client` 并导出 `./client`，而 `utils-main` 行挂的正是根包，所以这一行同时提供宿主行为（递归发现 + 技能仓库路由）和浏览器半侧；其余四个组件包只做宿主行为，不会被当成 client source，因此不会出现 `multiple active Loader sources`。
 
-配置走 `cordis.patch.yml`：bundle 给默认值，profile 按 id 覆盖。包根导出 `dsh-utils` 仍在，指向同一技能模块。要配置表单，自己加一条包根行。
+「技能仓库」的旧全局路由仍在根包里（`src/ui-host.ts`，编译到 `lib/ui-host.js`），由 `utils-main` 行注册；但它不再有独立侧边栏卡片，新的按预设仓库同步在 `dsh-workbench`。`client.js` 现在只注册配置页和一个 Utils 侧边栏面板。停用 `utils-main` 会失去递归发现、旧仓库路由和整个配置界面；停用 `dsh-workbench` 只会失去 Utils 路由（面板显示 404 提示）。
+
+配置写 `cordis.patch.yml`：bundle 给默认值，profile 按 id 覆盖。覆盖行**不要写 `name`**（写旧包名会被 DSH 按 name mismatch 跳过）。技能仓库的仓库地址、分支与密钥不写 profile，存在 `$DSH_HOME/storages/dsh-utils-ui.json`（沿用旧文件名）。
 
 ## 安装
 
-Desktop 或带插件管理器的会话：
-
-```
-plugin_manager action=install_bundle target=github:xi4z/dsh-utils
-```
-
-CLI profile：
+这是 pnpm workspace，先准备仓库：
 
 ```sh
-dsh plugin --profile <profile> add github:xi4z/dsh-utils
+cd /path/to/dsh-utils
+pnpm install
+pnpm build
 ```
 
-本地开发：`target=<本包绝对路径>`，或 CLI `add link:<本包绝对路径>`。仓库带 `lib/`，从 GitHub 装不用再构建。
+Release 已发到 npm 时，一行安装：
 
-装后 patch 自动插三条挂载项，不手写挂载块。`config:` 只管配置。挂载项新增/改名要重启宿主。
+```
+plugin_manager action=install_bundle target=@xi4z/dsh-utils
+```
 
-## 组件一：递归技能发现
+```sh
+dsh plugin --profile <profile> add @xi4z/dsh-utils
+```
+
+本地开发用 link（组件包未发布时）：
+
+```sh
+dsh plugin --profile <profile> add link:/path/to/dsh-utils
+for p in approval-policy notify skill-panel workbench; do
+  dsh plugin --profile <profile> add link:/path/to/dsh-utils/packages/$p
+done
+```
+
+profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 patch 自动插五行，不手写挂载块；`config:` 只管配置。挂载项新增/改名要重启宿主。
+
+从单包/无 scope 版本升级：
+
+1. profile 依赖里的 `dsh-utils`、`dsh-utils-*` link 换成 `@xi4z/dsh-utils`、`@xi4z/dsh-utils-*`；
+2. `dsh.profile.bundles` 里的 `dsh-utils` 换成 `@xi4z/dsh-utils`；
+3. profile `cordis.patch.yml` 的组件覆盖行不要写 `name:`（只留 `id` + `config`）；旧的 `id: dsh-utils-ui` 覆盖行删掉（该行已并入 `utils-main`）；
+4. 重启宿主。技能仓库设置、Deploy Key、上次同步记录都不用重填。
+
+## 发布
+
+发布顺序：先子包，后 bundle。
+
+```sh
+pnpm build
+pnpm publish:components   # 四个 packages/* 子包（改动过的才需要发）
+pnpm publish:bundle       # 根包（含 utils-main 代码）
+```
+
+`workspace:^` 在 publish 时转成 `^<子包当前版本>`，所以子包不改就不用重发；改根包行为只发 bundle。scope 是公开的 `@xi4z`。发布前 `npm login`，确认账号能使用 `@xi4z` scope（scope 通常是 npm 用户名或已创建的组织）。
+
+## 组件一（`utils-main`）：递归技能发现、旧仓库路由与浏览器 UI
 
 ```
 .dsh/skills/
@@ -248,72 +284,202 @@ template: |
 
 ### 从 @local/dsh-plugin-qq-notify 迁移
 
-直接合并 `@local/dsh-plugin-qq-notify` 0.2.0：模板、占位符、环境变量名、投递语义不变。只搬进 `dsh-utils`，补配置表单与热生效。
+直接合并 `@local/dsh-plugin-qq-notify` 0.2.0：模板、占位符、环境变量名、投递语义不变。只搬进 `@xi4z/dsh-utils`，补配置表单与热生效。
 
 1. profile `package.json` 去掉 `@local/dsh-plugin-qq-notify`（依赖与 `dsh.profile.bundles` 两处），改装本包。重启后旧 bundle 的 `qq-notify` 挂载项消失。
 2. 旧 `cordis.patch.yml` 里 `id: qq-notify` 行下的 `config:`，整体挪到新 `id: dsh-notify` 行下。字段名一致，不改写。
 3. 两个 id 不能同时挂，否则同一事件发两遍。旧命名空间 `qq-notify` 的存量值不读取。按第 2 步搬。
 4. 环境变量（`DSH_QQ_NOTIFY_*`）不改。
 
-## 配置写法
+## 组件四：技能面板（宿主侧）
+
+右侧栏的「技能」卡片已并入组件五 Utils 工作台，不再单独注册。宿主侧仍保留原来的模型可见性开关与配置页：列出当前会话能读取到的 Skill（模型技能目录），每行一个开关。
+
+开关语义：关掉 = 在 `ctx.skills.snapshot()` / `list()` 里把该技能标成 `modelInvocable: false`，模型下一轮拿到的 `<available_skills>` 里不再出现；**手动 `/名称` 仍可加载**。不是 modelInvocable 的技能（只能手动调用的）显示「仅手动」，开关禁用。
+
+数据来源：`GET /api/dsh-utils/skill-panel/list`（Connection owner 认证）。带 `sessionId` 时用该会话的 cwd 与 preset skill 层；不带时用宿主默认工作目录。返回按名称排序，`enabled = modelInvocable && !disabled`。
+
+持久化：写 profile settings 的 `dsh-skill-panel` 命名空间：
 
 ```yaml
-- id: skill-recursive
-  name: dsh-utils
+- id: dsh-skill-panel
+  config:
+    disabledSkills: []
+```
+
+`disabledSkills` 是 volatile，保存即生效、不用重启。面板本身不落盘。
+
+注意：这里只影响当前会话的模型可见性，不改预设目录里的 `SKILL.md`。按预设开关技能请用 Utils 工作台（重命名 `SKILL.md` / `SKILL.md.disabled`）。
+
+### 旧技能仓库路由
+
+`utils-main` 仍注册旧的全局仓库路由 `/api/dsh-utils-ui/*`（存储 `dsh-utils-ui.json`、`.deploy-key`），但不再有侧边栏卡片。新面板的「预设同步」也读写同一份存储与 Deploy Key 文件，用来拉取私有技能仓库；旧数据和旧路由保留，停用 `dsh-workbench` 不会影响它们。
+
+## 组件五：Utils 工作台
+
+一个侧边栏面板，把原来的「技能」「技能仓库」「Markdown」三张卡片合在一起，并把 `~/.dsh/.agent-presets/<id>/` 注册成真正的 agent preset。顶部选择预设（或「全局 / 项目 AGENTS.md」），下面四个视图：
+
+| 视图 | 作用 |
+|---|---|
+| 技能 | 列出 `<preset>/skills/` 下的 `SKILL.md` / `SKILL.md.disabled`，显示名称、描述、路径；开关直接重命名文件；「编辑 SKILL.md」跳到 Markdown 视图 |
+| Markdown | 列出该预设的 `AGENTS.md`（缺失也列出，保存即创建）以及全部 `.md` / `.md.disabled`；带草稿、还原、重读、`Ctrl/Cmd+S` |
+| 技能仓库 | 仓库地址、分支、`skills/` 下的目标子目录、密钥路径、Deploy Key、递归子模块；保存设置与「同步（拉取）」 |
+| 预设同步 | 配置共享技能仓库（仓库地址、分支、检出目录、Deploy Key）并 clone/快进私有仓库；读取其 `.dsh/preset` 下的共享预设，逐条或全部复制到 `$DSH_HOME/.agent-presets/`；可选删除源里已移除的文件 |
+
+目录预设注册：宿主启动、首次打开 Utils 或点“刷新”时，会把每个含 `agent.cordis.yml` 的目录注册成真正的 agent preset（声明一个 `cordis:include` 行）。注册成功后 DSH 的预设选择器就能选到它；加载失败会在面板列出 `broken` 诊断。
+
+预设来自 `$DSH_HOME/.agent-presets/<id>/`（以及 `presetDirs`）；顶部显示 `preset.yml` 的 name/description。全局视图保留 `$DSH_HOME/AGENTS.md`、`$DSH_AGENTS_HOME/AGENTS.md` 与项目根到当前目录的 AGENTS.md 链。
+
+目录预设会被 Utils **注册成真正的 agent preset**：每个目录声明一个 `cordis:include` 行指向它的 `agent.cordis.yml`，由 Loader 用原来的 `!!js` 入口列表解析并持续监听。注册成功后，DSH 的预设选择器会出现 `code`、`a-ce` 等目录预设；加载失败会在面板显示 `broken` 诊断。宿主启动时就会注册；首次打开 Utils 或点“刷新”也会补注册新增目录，不必重启。全局/项目 AGENTS.md 仍由 `dsh-agent-instructions` 读取。
+
+仓库同步只拉取：
+
+- 目标 `<preset>/skills/<targetSubdir>` 不存在：`git clone --depth 1 --branch <branch> --single-branch`；
+- 已存在：必须是同一仓库的 checkout、当前分支等于配置分支；`fetch` + `merge --ff-only`，浅克隆首次同步会 `--unshallow`，避免 unrelated histories；
+- 子模块可选：`git submodule sync --recursive` + `update --init --recursive`，失败只记 warning；
+- 不 reset、不 force、不推送。
+
+Deploy Key 按预设保存到 `$DSH_HOME/storages/dsh-utils-workbench/<preset>.key`（600），接口不回显；也可以填「密钥路径」指向已有私钥，路径优先。公开 `https://` / `file://` 可免密钥。
+
+#### 共享预设同步（`.dsh`）
+
+跟踪技能的 Git 仓库可以顺带携带预设：仓库根下的 `.dsh/preset` 目录被当作只读来源，面板把其中的预设目录复制到本机 `$DSH_HOME/.agent-presets/<id>/`，同步完立即由 legacy 桥注册成真正的 agent preset。支持的布局：
+
+```text
+<repo>/.dsh/preset/<id>/           # 推荐：一个仓库携带多个预设
+<repo>/.dsh/preset/                # 目录本身就是一个预设（preset.yml / agent.cordis.yml 直接放在这里）
+<repo>/.dsh/presets/<id>/          # 兼容别名
+<repo>/.dsh/.agent-presets/<id>/   # 兼容别名，镜像 $DSH_HOME 结构
+<repo>/.dsh/<id>/                  # 兼容：目录内需有 preset.yml 或 agent.cordis.yml
+```
+
+预设目录必须带 `preset.yml` 或 `agent.cordis.yml`；单个预设目录形式的 id 取 `preset.yml` 的 `id`，没有就取目录名。
+
+扫描来源：当前选中预设同步出来的技能仓库 checkout（`<preset>/skills/<targetSubdir>`）、共享技能仓库的 checkout（`$DSH_HOME/storages/dsh-utils-ui.json` 的 `targetDir`，默认 `$DSH_HOME/skills/herskill`）、`$DSH_HOME/skills` 及其带 `.dsh` 的一级子目录，以及配置项 `presetSourceDirs` 里列出的额外仓库，按真实路径去重。仓库本身不会被修改。
+
+**共享技能仓库与 Deploy Key**：面板里可直接配置被跟踪的技能仓库——仓库地址、分支、检出目录、可选密钥路径、Deploy Key 私钥，点「拉取」做 clone 或 `fetch` + `merge --ff-only`（浅克隆先 `--unshallow`，子模块可选），完成后 `.dsh/preset` 自动出现在下面的来源列表。私有仓库填 Deploy Key 即可；密钥只在保存时写入、接口不回显。
+
+检出目录就是**仓库根目录**，可以是任意绝对路径（如 `~/core/projects/skills`、`~/.dsh/skills-src/skills`），不必叫 `.dsh`，也不需要指向 `~/.dsh`；预设固定从 `<检出目录>/.dsh/preset` 读取。
+
+存储与旧全局路由兼容，两处看到的是同一份配置：
+
+- 设置：`$DSH_HOME/storages/dsh-utils-ui.json`（`repoUrl` / `branch` / `targetDir` / `keyPath` / `recurseSubmodules` / `lastSync`）
+- Deploy Key：`$DSH_HOME/storages/dsh-utils-ui.deploy-key`（600，不返回浏览器）
+- 密钥优先级：`keyPath` 指向的私钥 > 面板保存的 Deploy Key > 无；公开 `https://` / `file://` 可免密钥
+
+同步规则：
+
+- 逐文件写临时文件再 rename；内容相同则跳过，按源文件保留可执行位；跳过符号链接与 `.git` / `node_modules` 等忽略目录；单文件上限 8 MiB；
+- 「删除源中已移除的文件」只删**上一次同步清单里记录过、这次源里已消失**的文件，本机自己加的文件和预设里的 `.dsh-utils/repo.json` 不会被删；
+- 同步清单在 `$DSH_HOME/storages/dsh-utils-workbench/shared-presets.json`（600），用于显示「已接管」与上次同步时间；
+- 状态：`new`（本地没有）、`update`（文件内容不同）、`same`（已一致）、`invalid`（id 不合法，拒绝同步）。
+
+路由（Connection owner 认证）：
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| `GET` | `/api/dsh-utils/workbench/list` | 预设列表、技能、AGENTS.md 元数据、全局文件；带 `sessionId` 时用该会话 cwd |
+| `GET` | `/api/dsh-utils/workbench/files?presetId=…` | 一个预设或全局目标的 Markdown 文件 |
+| `GET / POST` | `/api/dsh-utils/workbench/file` | 读文件；POST `{id, content, baseMtimeMs, sessionId?}` 原子写入 |
+| `POST` | `/api/dsh-utils/workbench/skill` | `{presetId, path, enabled}`，重命名 SKILL.md |
+| `GET / POST` | `/api/dsh-utils/workbench/repo` | 读/存每个预设的仓库设置 |
+| `POST` | `/api/dsh-utils/workbench/key` | `{presetId, key}`，保存或清除 Deploy Key |
+| `POST` | `/api/dsh-utils/workbench/sync` | `{presetId}`，clone 或快进 |
+| `GET` | `/api/dsh-utils/workbench/shared?presetId=…` | 扫描技能仓库 `.dsh` 下的共享预设及同步状态 |
+| `POST` | `/api/dsh-utils/workbench/shared-sync` | `{presetId, ids?, prune?}`，把共享预设复制到本机预设目录 |
+| `GET / POST` | `/api/dsh-utils/workbench/shared-repo` | 读/存共享技能仓库设置（与旧全局路由同一份存储） |
+| `POST` | `/api/dsh-utils/workbench/shared-key` | `{key}`，保存或清除共享仓库 Deploy Key |
+| `POST` | `/api/dsh-utils/workbench/shared-pull` | 用配置的 Deploy Key clone 或快进共享技能仓库 |
+
+配置（全 volatile，保存即生效）：
+
+| 字段 | 默认 | 含义 |
+|---|---|---|
+| `maxBytes` | `524288` | 单文件读写上限（字节） |
+| `presetDirs` | `[]` | 额外的预设根目录；每个子目录视为一个预设 |
+| `presetSourceDirs` | `[]` | 额外的共享预设来源（技能仓库绝对路径）；读取其 `.dsh` 下的预设 |
+| `extraAgentsFiles` | `[]` | 全局视图额外暴露的 AGENTS.md 类绝对路径 |
+| `scanNestedAgents` | `false` | 全局视图递归寻找嵌套 AGENTS.md |
+| `nestedDepth` | `3` | 全局视图递归深度 |
+| `defaultRepoUrl` | `https://github.com/xi4z/skills` | 新预设的默认仓库地址 |
+| `defaultBranch` | `Agent` | 新预设的默认分支 |
+
+宿主半侧在 `packages/workbench/src/`（`index.ts` 路由、`presets.ts` 预设/技能/文件、`git.ts` 仓库同步），浏览器半侧仍是根包的 `client.js`。停用 `dsh-workbench` 行后路由消失，侧边栏 Utils 面板显示 404 提示。
+
+## 配置写法
+
+覆盖行只写 `id` 与 `config`，`name` 交给 bundle：
+
+```yaml
+- id: utils-main
   config:
     maxDepth: 6
     extraRoots:
       - D:/Core/Projects/Skill
 - id: dsh-approval-policy
-  name: dsh-utils/approval-policy
   config:
     origins: [subagent, scheduled, cron]
     windowSeconds: 300
     defaultOutcome: rejected
 - id: dsh-notify
-  name: dsh-utils/notify
   config:
     transport: gotify
     gotifyUrl: https://notify.example.com
     gotifyToken: gtfya.该系列的token
     deviceLabel: 办公本
     dryRun: false
+- id: dsh-skill-panel
+  config:
+    disabledSkills: []
+- id: dsh-workbench
+  config:
+    maxBytes: 524288
+    presetDirs: []
+    extraAgentsFiles: []
+    scanNestedAgents: false
+    nestedDepth: 3
+    defaultRepoUrl: https://github.com/xi4z/skills
+    defaultBranch: Agent
 ```
 
-三个 id 同时是 settings 命名空间。配置写 `cordis.patch.yml`：bundle 给默认，profile 按 id 覆盖。本 bundle 不挂包根行，插件页无每行配置表单（原因见「关于配置界面」）。组件启用/停用、运行状态照常显示。
+五个组件 id（`utils-main` + 四个子包）同时是 settings 命名空间；配置写 `cordis.patch.yml`：bundle 给默认，profile 按 id 覆盖。根包声明 `dsh.client`，`utils-main` 这个包根行同时让宿主加载 `client.js`；插件页每个挂载项都有配置页，右侧栏只有一个 Utils 面板。组件启用/停用、运行状态照常显示。
 
-`client.js` 保留：用 `ctx.configForms.whileServed(['skill-recursive','dsh-approval-policy','dsh-notify'], …)` 把三条挂载项配置页注册到 `plugins.row.config`（key = `dsh-utils#<挂载项 id>`）。只有额外挂 `name: dsh-utils` 包根行时，宿主才加载它。三个组件字段全 volatile，写入走宿主 settings 文档，保存即生效。
+根包的 `client.js` 用 `ctx.configForms.whileServed(['utils-main','dsh-approval-policy','dsh-notify','dsh-skill-panel','dsh-workbench'], …)` 把五个组件配置页注册到 `plugins.row.config`（key = `@xi4z/dsh-utils#<挂载项 id>`），并注册 `sidebar.right.pane.tab` 的 Utils 面板。五个组件的配置字段全 volatile，写入走宿主 settings 文档，保存即生效；Utils 的仓库设置存在各预设的 `.dsh-utils/repo.json`，Deploy Key 存在 storages，Markdown 直接落盘。
 
 ## 包结构
 
 ```
-dsh-utils/
-├── cordis.patch.yml      三条挂载项
-├── client.js             浏览器半侧（仅包根挂载行存在时加载）
-├── locale/{en,zh}.json   bundle 展示名与描述
-├── locale/skill-recursive/  技能发现行的独立标题
-├── locale/approval-policy/  审批门控行的独立标题
-├── locale/notify/           通知行的独立标题
+@xi4z/dsh-utils/            同时是 bundle 和 utils-main 组件包
+├── package.json              bundle patch/locale/icon + utils-main 入口 + dsh.client
+├── pnpm-workspace.yaml
+├── cordis.patch.yml          五行：utils-main + 四个组件包
+├── locale/{en,zh}.json       bundle 展示名与 utils-main 行标题
 ├── icon.svg
 ├── skills/dsh-approval-policy-config/SKILL.md
-├── src/                  三个组件 TypeScript 源
-│   ├── skill-recursive.ts
-│   ├── approval-policy.ts
-│   └── notify.ts
-└── lib/                  tsc 产物（含 .d.ts 与 source map）
+├── client.js                 浏览器半侧：配置页 + 右侧栏 Utils 面板
+├── src/{index.ts,ui-host.ts} utils-main：递归发现 + 旧技能仓库路由
+├── lib/…                     编译产物（index.js / ui-host.js）
+├── test/                     根包测试（utils-main / ui-host / client）
+└── packages/
+    ├── approval-policy/      @xi4z/dsh-utils-approval-policy
+    ├── notify/               @xi4z/dsh-utils-notify
+    ├── skill-panel/          @xi4z/dsh-utils-skill-panel
+    └── workbench/            @xi4z/dsh-utils-workbench
 ```
+
+每个包是标准的 DSH 插件包：`package.json` 的 `exports["."]` 指向 `lib/index.js`，只有根包额外声明 `dsh.client` 与 `./client`（包根行同时提供宿主行为与浏览器半侧）。加组件就是新建 `packages/<名>/`（`src/index.ts` + `locale/` + `package.json`），再在 bundle 的 `cordis.patch.yml` 里加一行、在根 `package.json` 的依赖里加 `workspace:^`。
 
 ## 开发
 
 ```sh
-npm install
-npm run build     # tsc -> lib/
-npm test          # 构建 + client.js 语法检查 + node --test（99 个用例）
+pnpm install
+pnpm build     # 根包（utils-main）+ 各子包 tsc -> lib/
+pnpm test      # 构建 + client.js 语法检查 + 根布局守卫 + 各包 node --test（171 个用例）
 ```
 
 ## 兼容性
 
-DeepSeek Harness `0.2.1-rc.5` 及以上。Node.js 22.19 及以上。运行时除 `@deepseek-ai/schemastery` 外无其他依赖。
+DeepSeek Harness `0.2.2-rc.1` 及以上。Node.js 22.19 及以上。运行时依赖 `@deepseek-ai/schemastery`；`client.js` 只依赖宿主提供的 React 运行时。Utils 面板需要宿主带右侧栏（web 组合默认带）。
 
 ## License
 

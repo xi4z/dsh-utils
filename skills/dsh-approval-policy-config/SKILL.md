@@ -17,11 +17,11 @@ description: "dsh-utils bundle 里无人值守审批门控组件（挂载项 dsh
 ## 配置入口
 
 持久化在 `cordis.patch.yml` 里审批门控挂载块（id = `dsh-approval-policy`，name =
-`dsh-utils/approval-policy`）的 `config:` 段；entry id 同时就是 settings 命名空间。
+`@xi4z/dsh-utils-approval-policy`）的 `config:` 段；entry id 同时就是 settings 命名空间。
 六个键**全部 volatile**，也可以直接在 dsh 设置页热改；改 `cordis.patch.yml` 则需重启 dsh 生效。
 bundle 方式（装好 `dsh-utils`）自动挂载，无需手写挂载块。
 
-同一个 bundle 里的另一个组件是递归技能发现（id = `skill-recursive`），两者互不依赖，
+同一个 bundle 里的另一个组件是递归技能发现 + 技能仓库同步（id = `utils-main`），两者互不依赖，
 可以单独禁用其中一个挂载项。
 
 ## 配置键
