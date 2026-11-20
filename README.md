@@ -1,20 +1,20 @@
 # @xi4z/dsh-utils
 
-官方实验性插件的多包形态：根包 `@xi4z/dsh-utils` 既是 bundle 层（`cordis.patch.yml` + locale + icon），也是主组件 `utils-main` 与整个浏览器半侧的代码所在——主组件挂在包根，其余组件各自是 `packages/` 下的独立包。行 id 就是 settings 命名空间，保持稳定。
+单包形态：`@xi4z/dsh-utils` 一个包既是 bundle 层（`cordis.patch.yml` + locale + icon），也是主组件 `utils-main` 与整个浏览器半侧的代码所在，其余四个组件以**包内 subpath** 挂载（`@xi4z/dsh-utils/workbench`）。因此 manifest 里没有任何 `@xi4z/*` 依赖，npm 名、GitHub 地址、packed tarball、本地目录四种装法都只需要这一个 spec。行 id 就是 settings 命名空间，保持稳定。
 
 | 组件 | 挂载项 id | 包 | 作用 |
 |---|---|---|---|
 | 递归技能发现 + 旧技能仓库路由（主组件） | `utils-main` | `@xi4z/dsh-utils`（包根） | 嵌套目录找 `SKILL.md`；保留旧的全局技能仓库 JSON 路由；`client.js` 提供全部配置页与右侧栏 Utils 面板 |
-| 无人值守审批门控 | `dsh-approval-policy` | `@xi4z/dsh-utils-approval-policy` | 给审批请求设应答窗口，超时 fail-closed |
-| 会话通知 | `dsh-notify` | `@xi4z/dsh-utils-notify` | 会话结束/等授权/等回答时，经 Gotify 网关推送，带设备名 |
-| 技能面板（宿主侧） | `dsh-skill-panel` | `@xi4z/dsh-utils-skill-panel` | 旧侧边栏卡片已并入 Utils；保留当前会话的模型可见性开关与配置页 |
-| Utils 工作台 | `dsh-workbench` | `@xi4z/dsh-utils-workbench` | 一个侧边栏面板按预设管理 skills、技能仓库与 AGENTS.md，并从技能仓库 `.dsh` 同步共享预设 |
+| 无人值守审批门控 | `dsh-approval-policy` | `@xi4z/dsh-utils/approval-policy` | 给审批请求设应答窗口，超时 fail-closed |
+| 会话通知 | `dsh-notify` | `@xi4z/dsh-utils/notify` | 会话结束/等授权/等回答时，经 Gotify 网关推送，带设备名 |
+| 技能面板（宿主侧） | `dsh-skill-panel` | `@xi4z/dsh-utils/skill-panel` | 旧侧边栏卡片已并入 Utils；保留当前会话的模型可见性开关与配置页 |
+| Utils 工作台 | `dsh-workbench` | `@xi4z/dsh-utils/workbench` | 一个侧边栏面板按预设管理 skills、技能仓库与 AGENTS.md，并从技能仓库 `.dsh` 同步共享预设 |
 
-根包的 `locale/{en,zh}.json` 同时是 bundle 展示名与 `utils-main` 行的标题（「Harness 工具集」）；其余组件包各自用自己的 locale 提供行标题（无人值守审批门控 / 会话通知 / 技能面板 / Utils 工作台）。`utils-main` 挂的就是根包自身（`name: '@xi4z/dsh-utils'`），所以 bundle 只需要这一个包就能工作；其他组件按包名挂载、可独立发布与停用。
+根包的 `locale/{en,zh}.json` 同时是 bundle 展示名与 `utils-main` 行的标题（「Harness 工具集」）；四个 subpath 行各自从 `./<subpath>/locale/*.json` 取行标题（无人值守审批门控 / 会话通知 / 技能面板 / Utils 工作台）。subpath 行不是包，DSH 不读它的 `package.json`，所以组件目录里那份 manifest 只是 tsc/测试的构建单元，不再发布。
 
 ### 关于配置界面
 
-DSH 客户端扫描器从**包根挂载行**加载 `client.js`。根包自己声明 `dsh.client` 并导出 `./client`，而 `utils-main` 行挂的正是根包，所以这一行同时提供宿主行为（递归发现 + 技能仓库路由）和浏览器半侧；其余四个组件包只做宿主行为，不会被当成 client source，因此不会出现 `multiple active Loader sources`。
+DSH 客户端扫描器从**包根挂载行**加载 `client.js`。根包自己声明 `dsh.client` 并导出 `./client`，而 `utils-main` 行挂的正是包根，所以这一行同时提供宿主行为（递归发现 + 技能仓库路由）和浏览器半侧；四个 subpath 行只做宿主行为，不会被当成 client source，因此不会出现 `multiple active Loader sources`。
 
 「技能仓库」的旧全局路由仍在根包里（`src/ui-host.ts`，编译到 `lib/ui-host.js`），由 `utils-main` 行注册；但它不再有独立侧边栏卡片，新的按预设仓库同步在 `dsh-workbench`。`client.js` 现在只注册配置页和一个 Utils 侧边栏面板。停用 `utils-main` 会失去递归发现、旧仓库路由和整个配置界面；停用 `dsh-workbench` 只会失去 Utils 路由（面板显示 404 提示）。
 
@@ -22,15 +22,14 @@ DSH 客户端扫描器从**包根挂载行**加载 `client.js`。根包自己声
 
 ## 安装
 
-这是 pnpm workspace，先准备仓库：
+一个包，四种 spec，装法都一样：
 
-```sh
-cd /path/to/dsh-utils
-pnpm install
-pnpm build
-```
-
-Release 已发到 npm 时，一行安装：
+| 想要的 | `target` |
+|---|---|
+| 最近一次发布 | `@xi4z/dsh-utils` |
+| `main` 最新提交 | `https://github.com/xi4z/dsh-utils` |
+| 离线单文件 | `/abs/path/xi4z-dsh-utils-0.4.0.tgz` |
+| 改代码、即时生效 | `/abs/path/dsh-utils`（绝对目录，装成 `link:`） |
 
 ```
 plugin_manager action=install_bundle target=@xi4z/dsh-utils
@@ -40,35 +39,60 @@ plugin_manager action=install_bundle target=@xi4z/dsh-utils
 dsh plugin --profile <profile> add @xi4z/dsh-utils
 ```
 
-本地开发用 link（组件包未发布时）：
+四种都不要求 registry 上有任何 `@xi4z/*` 包：四个组件是包内 subpath 行（`@xi4z/dsh-utils/workbench`），根包只依赖公共的 `@deepseek-ai/schemastery`。GitHub 地址装的是 `main` 当前状态、不钉版本；要钉就用 npm 名或 `#<commit>`。
+
+离线单文件由 `pnpm pack` 产出，本身就是自包含的：
 
 ```sh
-dsh plugin --profile <profile> add link:/path/to/dsh-utils
-for p in approval-policy notify skill-panel workbench; do
-  dsh plugin --profile <profile> add link:/path/to/dsh-utils/packages/$p
-done
+pnpm install && pnpm build
+pnpm pack --pack-destination dist      # → dist/xi4z-dsh-utils-0.4.0.tgz
+# 复制到目标机器后：
+plugin_manager action=install_bundle target=/abs/path/xi4z-dsh-utils-0.4.0.tgz
 ```
+
+本地开发直接装目录（`link:`，不复制文件，改完 `pnpm build` 重启宿主）：
+
+```sh
+cd /path/to/dsh-utils
+pnpm install && pnpm build
+plugin_manager action=install_bundle target=/abs/path/to/dsh-utils
+```
+
+> 别给根包加回 `@xi4z/*` 依赖，也别把版本写成 `workspace:^`：那会毁掉"一条 spec 装全套"——`workspace:` 只在仓库内 `pnpm publish`/`pnpm pack` 时被改写成版本号，profile 从 git 或 tarball 装时 pnpm 拿到的是字面量，直接报 `ERR_PNPM_WORKSPACE_PKG_NOT_FOUND`。
 
 profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 patch 自动插五行，不手写挂载块；`config:` 只管配置。挂载项新增/改名要重启宿主。
 
 从单包/无 scope 版本升级：
 
-1. profile 依赖里的 `dsh-utils`、`dsh-utils-*` link 换成 `@xi4z/dsh-utils`、`@xi4z/dsh-utils-*`；
-2. `dsh.profile.bundles` 里的 `dsh-utils` 换成 `@xi4z/dsh-utils`；
+1. profile 依赖只留 `@xi4z/dsh-utils`，把 `dsh-utils`、`dsh-utils-*`、`@xi4z/dsh-utils-approval-policy` 这类的 link 全删掉（组件已并入根包，多留会变成不识别的孤儿依赖）；
+2. `dsh.profile.bundles` 里的旧名换成 `@xi4z/dsh-utils`；
 3. profile `cordis.patch.yml` 的组件覆盖行不要写 `name:`（只留 `id` + `config`）；旧的 `id: dsh-utils-ui` 覆盖行删掉（该行已并入 `utils-main`）；
 4. 重启宿主。技能仓库设置、Deploy Key、上次同步记录都不用重填。
 
 ## 发布
 
-发布顺序：先子包，后 bundle。
+只有一个包要发。`scripts/release.mjs` 先 `npm view` 探一遍，**版本已在 registry 上就跳过**，所以重复跑安全、失败后重跑能从断点续上。
+
+推 GitHub 与发 npm 可以合成一次操作——打 tag 触发 [`publish.yml`](.github/workflows/publish.yml)：
+
+```sh
+git push                                    # 先推代码
+git tag v0.4.0 && git push origin v0.4.0    # 再推 tag，CI 里 build + 发布
+```
+
+tag 必须等于根包 `package.json` 的版本，否则 job 直接失败（防止把 0.4.0 的代码发成 0.3.9）。CI 里 `pnpm release` 只发根包（组件都在包里），带 `--provenance`。
+
+一次性准备：npm 建一个 Automation token，存成仓库 secret `NPM_TOKEN`。scope 是公开的 `@xi4z`，token 所属账号要能用这个 scope（scope 通常是 npm 用户名或已创建的组织）。
+
+手动发（本机 `npm login` 后，脚本逻辑与 CI 相同）：
 
 ```sh
 pnpm build
-pnpm publish:components   # 四个 packages/* 子包（改动过的才需要发）
-pnpm publish:bundle       # 根包（含 utils-main 代码）
+pnpm release             # 发根包；版本已在 registry 上就跳过
+pnpm release --dry-run   # 只看会不会发，不动 registry
 ```
 
-`workspace:^` 在 publish 时转成 `^<子包当前版本>`，所以子包不改就不用重发；改根包行为只发 bundle。scope 是公开的 `@xi4z`。发布前 `npm login`，确认账号能使用 `@xi4z` scope（scope 通常是 npm 用户名或已创建的组织）。
+组件改了不用单独发布：它们随根包一起走，`packages/<名>/lib` 和 `locale` 都进 `files`，`pnpm pack` 后即自包含。只发一个包也意味着版本只有一个——改了任何组件都要提根包版本号。
 
 ## 组件一（`utils-main`）：递归技能发现、旧仓库路由与浏览器 UI
 
@@ -460,39 +484,40 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
     defaultBranch: Agent
 ```
 
-五个组件 id（`utils-main` + 四个子包）同时是 settings 命名空间；配置写 `cordis.patch.yml`：bundle 给默认，profile 按 id 覆盖。根包声明 `dsh.client`，`utils-main` 这个包根行同时让宿主加载 `client.js`；插件页每个挂载项都有配置页，右侧栏只有一个 Utils 面板。组件启用/停用、运行状态照常显示。
+五个组件 id（`utils-main` + 四个 subpath 组件）同时是 settings 命名空间；配置写 `cordis.patch.yml`：bundle 给默认，profile 按 id 覆盖。根包声明 `dsh.client`，`utils-main` 这个包根行同时让宿主加载 `client.js`；插件页每个挂载项都有配置页，右侧栏只有一个 Utils 面板。组件启用/停用、运行状态照常显示。
 
 根包的 `client.js` 用 `ctx.configForms.whileServed(['utils-main','dsh-approval-policy','dsh-notify','dsh-skill-panel','dsh-workbench'], …)` 把五个组件配置页注册到 `plugins.row.config`（key = `@xi4z/dsh-utils#<挂载项 id>`），并注册 `sidebar.right.pane.tab` 的 Utils 面板。五个组件的配置字段全 volatile，写入走宿主 settings 文档，保存即生效；Utils 的仓库设置存在各预设的 `.dsh-utils/repo.json`，Deploy Key 存在 storages，Markdown 直接落盘。
 
 ## 包结构
 
 ```
-@xi4z/dsh-utils/            同时是 bundle 和 utils-main 组件包
-├── package.json              bundle patch/locale/icon + utils-main 入口 + dsh.client
-├── pnpm-workspace.yaml
-├── cordis.patch.yml          五行：utils-main + 四个组件包
+@xi4z/dsh-utils/            唯一的可安装包：bundle + 全部五个组件
+├── package.json              bundle patch/locale/icon + subpath exports + dsh.client
+├── pnpm-workspace.yaml       只用来把 packages/* 当 tsc/测试的构建单元
+├── cordis.patch.yml          五行：utils-main（包根）+ 四个 subpath 行
 ├── locale/{en,zh}.json       bundle 展示名与 utils-main 行标题
 ├── icon.svg
 ├── skills/dsh-approval-policy-config/SKILL.md
 ├── client.js                 浏览器半侧：配置页 + 右侧栏 Utils 面板
 ├── src/{index.ts,ui-host.ts} utils-main：递归发现 + 旧技能仓库路由
 ├── lib/…                     编译产物（index.js / ui-host.js）
-├── test/                     根包测试（utils-main / ui-host / client）
+├── scripts/release.mjs       只发根包，已发布版本跳过
+├── test/                     根包测试（utils-main / ui-host / client / 布局守卫）
 └── packages/
-    ├── approval-policy/      @xi4z/dsh-utils-approval-policy
-    ├── notify/               @xi4z/dsh-utils-notify
-    ├── skill-panel/          @xi4z/dsh-utils-skill-panel
-    └── workbench/            @xi4z/dsh-utils-workbench
+    ├── approval-policy/      → 导出为 @xi4z/dsh-utils/approval-policy
+    ├── notify/               → 导出为 @xi4z/dsh-utils/notify
+    ├── skill-panel/          → 导出为 @xi4z/dsh-utils/skill-panel
+    └── workbench/            → 导出为 @xi4z/dsh-utils/workbench
 ```
 
-每个包是标准的 DSH 插件包：`package.json` 的 `exports["."]` 指向 `lib/index.js`，只有根包额外声明 `dsh.client` 与 `./client`（包根行同时提供宿主行为与浏览器半侧）。加组件就是新建 `packages/<名>/`（`src/index.ts` + `locale/` + `package.json`），再在 bundle 的 `cordis.patch.yml` 里加一行、在根 `package.json` 的依赖里加 `workspace:^`。
+`packages/<名>/` 仍是标准的插件源码目录（`src/index.ts` + `locale/` + 自己的 `package.json` 供 tsc 与包内测试用），但**不单独发布**：根包的 `exports["./<名>"]` 指向它的 `lib/index.js`，`exports["./<名>/locale/*.json"]` 指向它的 locale，`files` 里的 `packages/*/lib` 与 `packages/*/locale` 负责打进 tarball。加组件＝新建 `packages/<名>/`，再在根 `package.json` 加两条 `exports`（入口 + locale）、在 `files` 已覆盖的前提下加一行 patch；`test/layout.test.mjs` 会检查这三处是否对齐。
 
 ## 开发
 
 ```sh
 pnpm install
-pnpm build     # 根包（utils-main）+ 各子包 tsc -> lib/
-pnpm test      # 构建 + client.js 语法检查 + 根布局守卫 + 各包 node --test（171 个用例）
+pnpm build     # 根包（utils-main）+ packages/* 的 tsc -> lib/
+pnpm test      # 构建 + client.js 语法检查 + 布局守卫 + 各包 node --test（176 个用例）
 ```
 
 ## 兼容性

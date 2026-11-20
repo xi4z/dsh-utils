@@ -1,2 +1,5 @@
 packages:
   - packages/*
+
+# packages/* 只是 tsc 与包内测试的构建单元：组件通过根包的 subpath exports
+# 发布，根包 manifest 里没有任何 @xi4z/* 依赖，所以不需要 linkWorkspacePackages。

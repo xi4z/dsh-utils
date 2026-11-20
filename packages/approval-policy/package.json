@@ -50,8 +50,5 @@
     "@deepseek-ai/dsh-user-approval": "0.2.2-rc.2",
     "@types/node": "^24.0.0",
     "typescript": "~5.9.0"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

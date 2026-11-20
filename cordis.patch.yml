@@ -1,12 +1,18 @@
 # dsh-utils — bundle layer for the utility components.
 #
-# The root package of this workspace is both the bundle and the main component:
-# it owns the patch + locale + icon + browser bundle (client.js), and
-# `utils-main` mounts that same package as an ordinary row. Because that row is
-# a package-root row, DSH's client-module scanner also serves this package's
-# client.js from it. The remaining components are separate packages under
-# `packages/`, mounted by name — the same shape as the official experimental
-# bundles, whose component packages are independent.
+# Everything ships in ONE package. The root package owns the patch + locale +
+# icon + browser bundle (client.js) and the `utils-main` component, and the
+# other four components are mounted as **subpath rows** of that same package
+# (`@xi4z/dsh-utils/workbench`), resolved through this package's `exports`.
+# A subpath row is not a package: DSH never reads its `package.json`; its display
+# title comes from the exported `./<subpath>/locale/*.json`. The upside is that
+# the manifest has no `@xi4z/*` dependencies at all, so the bundle installs from
+# a registry, a Git URL, a packed tarball or a local directory alike.
+# Because `utils-main` is a package-root row, DSH's client-module scanner also
+# serves this package's client.js from it.
+#
+# The `packages/` directories stay as build units for tsc and for the per-package
+# tests; they are not published.
 #
 #   utils-main           — the root package itself: recursive SKILL.md discovery
 #                          in nested skill folders, plus the legacy global
@@ -35,10 +41,10 @@
       name: '@xi4z/dsh-utils'
       config: {}
     - id: dsh-approval-policy
-      name: '@xi4z/dsh-utils-approval-policy'
+      name: '@xi4z/dsh-utils/approval-policy'
       config: {}
     - id: dsh-notify
-      name: '@xi4z/dsh-utils-notify'
+      name: '@xi4z/dsh-utils/notify'
       config:
         # 留空 = 内置默认。下面只列出最常改的几项，完整字段见 README。
         #
@@ -59,12 +65,12 @@
         notifyOnApproval: true
         notifyOnQuestion: true
     - id: dsh-skill-panel
-      name: '@xi4z/dsh-utils-skill-panel'
+      name: '@xi4z/dsh-utils/skill-panel'
       config:
         # 模型技能目录里隐藏的技能名；面板开关写入这里，热生效。
         disabledSkills: []
     - id: dsh-workbench
-      name: '@xi4z/dsh-utils-workbench'
+      name: '@xi4z/dsh-utils/workbench'
       config:
         # 单文件读写上限（字节）。AGENTS.md 本质上也是提示词，别放太大。
         maxBytes: 524288

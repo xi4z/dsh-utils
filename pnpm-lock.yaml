@@ -11,18 +11,6 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ~3.19.0
         version: 3.19.0
-      '@xi4z/dsh-utils-approval-policy':
-        specifier: workspace:^
-        version: link:packages/approval-policy
-      '@xi4z/dsh-utils-notify':
-        specifier: workspace:^
-        version: link:packages/notify
-      '@xi4z/dsh-utils-skill-panel':
-        specifier: workspace:^
-        version: link:packages/skill-panel
-      '@xi4z/dsh-utils-workbench':
-        specifier: workspace:^
-        version: link:packages/workbench
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.1.0
