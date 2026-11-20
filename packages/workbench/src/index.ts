@@ -55,6 +55,7 @@ import {
 import { createLegacyBridge, type LegacyBridge } from './legacy.js'
 import { sharedPresetView, syncSharedPresets } from './shared.js'
 import { pullSharedRepo, saveSharedRepoConfig, saveSharedRepoKey, sharedRepoView } from './global-repo.js'
+import { importNativePresets, nativePresetView, publishPresets } from './native.js'
 
 export const name = 'preset-workbench'
 
@@ -72,6 +73,9 @@ export const ROUTE_PATHS = {
   sharedRepo: '/api/dsh-utils/workbench/shared-repo',
   sharedKey: '/api/dsh-utils/workbench/shared-key',
   sharedPull: '/api/dsh-utils/workbench/shared-pull',
+  native: '/api/dsh-utils/workbench/native-presets',
+  nativeImport: '/api/dsh-utils/workbench/native-presets-import',
+  publish: '/api/dsh-utils/workbench/presets-publish',
 } as const
 
 /**
@@ -85,6 +89,8 @@ export const Config = z.object({
     .description('额外的预设根目录；每个子目录被视为一个预设。').volatile(),
   presetSourceDirs: z.array(z.string().min(1)).default([])
     .description('额外的技能仓库目录；其 .dsh 下的预设可同步到本机。').volatile(),
+  builtinPresets: z.array(z.string().min(1)).default(['standard', 'ptc', 'minimal', 'creator'])
+    .description('保留为原生的预设 id；其余原生声明可导入为目录预设。').volatile(),
   extraAgentsFiles: z.array(z.string().min(1)).default([])
     .description('全局视图额外暴露的 AGENTS.md 类绝对路径。').volatile(),
   scanNestedAgents: z.boolean().default(false)
@@ -139,6 +145,9 @@ export function apply(ctx: Context, config: WorkbenchConfig = {}): void {
     registerRoute(scope, ctx, connection, ROUTE_PATHS.sharedRepo, ['GET', 'POST'], (request) => handleSharedRepo(ctx, config, request))
     registerRoute(scope, ctx, connection, ROUTE_PATHS.sharedKey, ['POST'], (request) => handleSharedKey(ctx, config, request))
     registerRoute(scope, ctx, connection, ROUTE_PATHS.sharedPull, ['POST'], (request) => handleSharedPull(ctx, config, request))
+    registerRoute(scope, ctx, connection, ROUTE_PATHS.native, ['GET'], (request) => handleNative(ctx, config, request))
+    registerRoute(scope, ctx, connection, ROUTE_PATHS.nativeImport, ['POST'], (request) => handleNativeImport(ctx, config, legacy, request))
+    registerRoute(scope, ctx, connection, ROUTE_PATHS.publish, ['POST'], (request) => handlePublish(ctx, config, request))
   })
 }
 
@@ -328,6 +337,43 @@ async function handleSharedSync(ctx: Context, config: WorkbenchConfig, legacy: L
     return json(payload, 200)
   } catch (error) {
     return failure(ctx, 'cannot sync shared presets', error)
+  }
+}
+
+/** GET /native-presets: declared presets the workbench could take over. */
+async function handleNative(ctx: Context, config: WorkbenchConfig, request: Request): Promise<Response> {
+  try {
+    return json(await nativePresetView(ctx, normalizeOptions(config)), 200)
+  } catch (error) {
+    return failure(ctx, 'cannot list native presets', error)
+  }
+}
+
+/** POST /native-presets-import: export non-built-in declarations as directories. */
+async function handleNativeImport(ctx: Context, config: WorkbenchConfig, legacy: LegacyBridge, request: Request): Promise<Response> {
+  try {
+    const body = await readJsonBody(request)
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new WorkbenchError('请求体必须是 JSON 对象', 400)
+    const payload = await importNativePresets(ctx, normalizeOptions(config), body as Record<string, unknown>)
+    try {
+      await legacy.ensure()
+    } catch (error) {
+      ctx.logger.warn('workbench: preset registration after native import failed: ' + String(error))
+    }
+    return json(payload, 200)
+  } catch (error) {
+    return failure(ctx, 'cannot import native presets', error)
+  }
+}
+
+/** POST /presets-publish: copy local presets into the shared repository and push. */
+async function handlePublish(ctx: Context, config: WorkbenchConfig, request: Request): Promise<Response> {
+  try {
+    const body = await readJsonBody(request)
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new WorkbenchError('请求体必须是 JSON 对象', 400)
+    return json(await publishPresets(ctx, normalizeOptions(config), body as Record<string, unknown>), 200)
+  } catch (error) {
+    return failure(ctx, 'cannot publish presets', error)
   }
 }
 

@@ -33,6 +33,9 @@ export declare const ROUTE_PATHS: {
     readonly sharedRepo: "/api/dsh-utils/workbench/shared-repo";
     readonly sharedKey: "/api/dsh-utils/workbench/shared-key";
     readonly sharedPull: "/api/dsh-utils/workbench/shared-pull";
+    readonly native: "/api/dsh-utils/workbench/native-presets";
+    readonly nativeImport: "/api/dsh-utils/workbench/native-presets-import";
+    readonly publish: "/api/dsh-utils/workbench/presets-publish";
 };
 /**
  * Settings schema. Every field is volatile: the routes re-read the live
@@ -42,6 +45,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     maxBytes: z<number, number, "volatile-defined">;
     presetDirs: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
     presetSourceDirs: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
+    builtinPresets: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
     extraAgentsFiles: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
     scanNestedAgents: z<boolean, boolean, "volatile-defined">;
     nestedDepth: z<number, number, "volatile-defined">;
@@ -51,6 +55,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     maxBytes: z<number, number, "volatile-defined">;
     presetDirs: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
     presetSourceDirs: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
+    builtinPresets: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
     extraAgentsFiles: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
     scanNestedAgents: z<boolean, boolean, "volatile-defined">;
     nestedDepth: z<number, number, "volatile-defined">;

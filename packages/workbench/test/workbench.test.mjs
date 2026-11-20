@@ -373,6 +373,28 @@ test('lists and syncs .dsh presets carried by a skill repository', async (t) => 
   assert.match(syncedTeam.lastSyncAt, /T/)
 })
 
+function fakeNativeRegistry(docs) {
+  const registered = []
+  return {
+    async register(definition) {
+      registered.push(definition)
+      return async () => {}
+    },
+    async list() {
+      return Object.entries(docs).map(([id, doc]) => ({
+        id,
+        ...(doc.name === undefined ? {} : { name: doc.name }),
+        ...(doc.description === undefined ? {} : { description: doc.description }),
+      }))
+    },
+    async readDocument(id) {
+      const doc = docs[id]
+      if (doc === undefined) throw new Error('unknown preset: ' + id)
+      return { agentPreset: id, content: doc.content, ...(doc.name === undefined ? {} : { name: doc.name }), ...(doc.description === undefined ? {} : { description: doc.description }) }
+    },
+  }
+}
+
 async function createSharedGitRepo(dir, ids = ['team'], branch = 'main') {
   await createSharedRepo(dir, ids)
   await git(['init', '--quiet', '--initial-branch=' + branch], dir)
@@ -380,6 +402,90 @@ async function createSharedGitRepo(dir, ids = ['team'], branch = 'main') {
   await git(['commit', '--quiet', '-m', 'initial'], dir)
   return dir
 }
+
+test('imports non-built-in native presets as directory presets', async (t) => {
+  const registry = fakeNativeRegistry({
+    standard: { name: 'Standard', content: '- id: standard-persona\n  name: cordis:group\n  group: true\n  config: []\n' },
+    butler: { name: '管家模式', description: 'butler preset', content: '- id: butler-persona\n  name: cordis:group\n  group: true\n  config: []\n' },
+  })
+  const { connection, home } = await setup(t, { registry })
+
+  const listed = await call(connection, ROUTE_PATHS.native)
+  assert.equal(listed.response.status, 200, JSON.stringify(listed.body))
+  const standard = listed.body.presets.find((row) => row.id === 'standard')
+  const butler = listed.body.presets.find((row) => row.id === 'butler')
+  assert.equal(standard.builtin, true)
+  assert.equal(standard.importable, false)
+  assert.equal(butler.builtin, false)
+  assert.equal(butler.importable, true)
+
+  const imported = await call(connection, ROUTE_PATHS.nativeImport, { method: 'POST', body: { ids: ['butler'] } })
+  assert.equal(imported.response.status, 200, JSON.stringify(imported.body))
+  assert.deepEqual(imported.body.results.map((row) => [row.id, row.status]), [['butler', 'imported']])
+  const target = join(home, '.agent-presets', 'butler')
+  assert.equal(await readFile(join(target, 'agent.cordis.yml'), 'utf8').then((text) => text.includes('butler-persona')), true)
+  assert.match(await readFile(join(target, 'preset.yml'), 'utf8'), /管家模式/)
+  assert.equal((await imported.body.view.presets.find((row) => row.id === 'butler')).directory, true)
+
+  const again = await call(connection, ROUTE_PATHS.nativeImport, { method: 'POST', body: { ids: ['butler'] } })
+  assert.equal(again.body.results[0].status, 'exists')
+  const builtin = await call(connection, ROUTE_PATHS.nativeImport, { method: 'POST', body: { ids: ['standard'] } })
+  assert.equal(builtin.body.results[0].status, 'skipped')
+})
+
+test('publishes non-built-in presets into the shared repository', async (t) => {
+  const { connection, root } = await setup(t)
+  const repo = join(root, 'shared-work')
+  await mkdir(join(repo, '.dsh', 'preset', 'seed'), { recursive: true })
+  await writeFile(join(repo, '.dsh', 'preset', 'seed', 'preset.yml'), 'name: seed\n')
+  await git(['init', '--quiet', '--initial-branch=main'], repo)
+  await git(['add', '--all'], repo)
+  await git(['commit', '--quiet', '-m', 'seed'], repo)
+  await writeFile(join(repo, 'unrelated.md'), '# keep me out\n')
+
+  const saved = await call(connection, ROUTE_PATHS.sharedRepo, {
+    method: 'POST',
+    body: { repoUrl: 'file://' + repo, branch: 'main', targetDir: repo, recurseSubmodules: false },
+  })
+  assert.equal(saved.response.status, 200, JSON.stringify(saved.body))
+
+  const published = await call(connection, ROUTE_PATHS.publish, { method: 'POST', body: { push: false } })
+  assert.equal(published.response.status, 200, JSON.stringify(published.body))
+  assert.equal(published.body.pushed, false)
+  assert.match(published.body.commit, /^[0-9a-f]{40}$/)
+  assert.deepEqual(published.body.results.map((row) => row.id).sort(), ['demo', 'other'])
+  assert.equal(await readFile(join(repo, '.dsh', 'preset', 'demo', 'preset.yml'), 'utf8').then((text) => text.includes('Demo preset')), true)
+  assert.equal(await readFile(join(repo, '.dsh', 'preset', 'seed', 'preset.yml'), 'utf8'), 'name: seed\n')
+
+  const shown = await git(['-C', repo, 'show', '--name-only', '--pretty=format:', 'HEAD'])
+  assert.match(shown, /^\.dsh\/preset\/demo\/preset\.yml$/m)
+  const status = await git(['-C', repo, 'status', '--porcelain'])
+  assert.match(status, /^\?\? unrelated\.md$/m)
+})
+
+test('pushes published presets to the shared repository origin', async (t) => {
+  const { connection, root } = await setup(t)
+  const bare = join(root, 'shared-origin.git')
+  await git(['init', '--quiet', '--bare', '--initial-branch=main', bare], root)
+  const repo = join(root, 'shared-push')
+  await mkdir(join(repo, '.dsh', 'preset', 'seed'), { recursive: true })
+  await writeFile(join(repo, '.dsh', 'preset', 'seed', 'preset.yml'), 'name: seed\n')
+  await git(['init', '--quiet', '--initial-branch=main'], repo)
+  await git(['add', '--all'], repo)
+  await git(['commit', '--quiet', '-m', 'seed'], repo)
+  await git(['remote', 'add', 'origin', 'file://' + bare], repo)
+  await git(['push', '--quiet', '-u', 'origin', 'main'], repo)
+
+  await call(connection, ROUTE_PATHS.sharedRepo, {
+    method: 'POST',
+    body: { repoUrl: 'file://' + bare, branch: 'main', targetDir: repo, recurseSubmodules: false },
+  })
+  const published = await call(connection, ROUTE_PATHS.publish, { method: 'POST', body: { push: true } })
+  assert.equal(published.response.status, 200, JSON.stringify(published.body))
+  assert.equal(published.body.pushed, true)
+  const remoteHead = await git(['-C', bare, 'rev-parse', 'main'])
+  assert.equal(remoteHead, published.body.commit)
+})
 
 test('reads and saves the shared skill repository settings and deploy key', async (t) => {
   const { connection, home } = await setup(t)

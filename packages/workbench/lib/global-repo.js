@@ -193,7 +193,7 @@ export function sharedStoredKeyPath() {
     return join(dshHome(), 'storages', KEY_FILE_NAME);
 }
 /** The SSH identity for the shared repository. */
-async function sharedKeyStatus(state) {
+export async function sharedKeyStatus(state) {
     if (state.keyPath !== '') {
         let file;
         try {

@@ -237,7 +237,7 @@ export function sharedStoredKeyPath(): string {
 }
 
 /** The SSH identity for the shared repository. */
-async function sharedKeyStatus(state: SharedRepoState): Promise<KeyStatus> {
+export async function sharedKeyStatus(state: SharedRepoState): Promise<KeyStatus> {
   if (state.keyPath !== '') {
     let file: string
     try {

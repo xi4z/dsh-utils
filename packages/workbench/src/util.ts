@@ -43,6 +43,7 @@ export interface WorkbenchConfig {
   readonly maxBytes?: MaybeRef<number>
   readonly presetDirs?: MaybeRef<readonly string[]>
   readonly presetSourceDirs?: MaybeRef<readonly string[]>
+  readonly builtinPresets?: MaybeRef<readonly string[]>
   readonly extraAgentsFiles?: MaybeRef<readonly string[]>
   readonly scanNestedAgents?: MaybeRef<boolean>
   readonly nestedDepth?: MaybeRef<number>
@@ -55,6 +56,7 @@ export interface Options {
   readonly maxBytes: number
   readonly presetDirs: string[]
   readonly presetSourceDirs: string[]
+  readonly builtinPresets: string[]
   readonly extraAgentsFiles: string[]
   readonly scanNestedAgents: boolean
   readonly nestedDepth: number
@@ -148,6 +150,7 @@ export function normalizeOptions(config: WorkbenchConfig | undefined): Options {
     maxBytes: clamp(refValue(config?.maxBytes, DEFAULT_MAX_BYTES), 1024, BODY_LIMIT_BYTES),
     presetDirs: stringList(refValue(config?.presetDirs, [])),
     presetSourceDirs: stringList(refValue(config?.presetSourceDirs, [])),
+    builtinPresets: stringList(refValue(config?.builtinPresets, ['standard', 'ptc', 'minimal', 'creator'])),
     extraAgentsFiles: stringList(refValue(config?.extraAgentsFiles, [])),
     scanNestedAgents: refValue(config?.scanNestedAgents, false) === true,
     nestedDepth: clamp(refValue(config?.nestedDepth, 3), 1, 8),

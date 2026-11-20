@@ -324,7 +324,7 @@ template: |
 | 技能 | 列出 `<preset>/skills/` 下的 `SKILL.md` / `SKILL.md.disabled`，显示名称、描述、路径；开关直接重命名文件；「编辑 SKILL.md」跳到 Markdown 视图 |
 | Markdown | 列出该预设的 `AGENTS.md`（缺失也列出，保存即创建）以及全部 `.md` / `.md.disabled`；带草稿、还原、重读、`Ctrl/Cmd+S` |
 | 技能仓库 | 仓库地址、分支、`skills/` 下的目标子目录、密钥路径、Deploy Key、递归子模块；保存设置与「同步（拉取）」 |
-| 预设同步 | 配置共享技能仓库（仓库地址、分支、检出目录、Deploy Key）并 clone/快进私有仓库；读取其 `.dsh/preset` 下的共享预设，逐条或全部复制到 `$DSH_HOME/.agent-presets/`；可选删除源里已移除的文件 |
+| 预设同步 | 配置共享技能仓库（仓库地址、分支、检出目录、Deploy Key）并 clone/快进私有仓库；读取其 `.dsh/preset` 下的共享预设，逐条或全部复制到 `$DSH_HOME/.agent-presets/`；导入非内置原生预设，并发布目录预设到共享仓库、提交推送 |
 
 目录预设注册：宿主启动、首次打开 Utils 或点“刷新”时，会把每个含 `agent.cordis.yml` 的目录注册成真正的 agent preset（声明一个 `cordis:include` 行）。注册成功后 DSH 的预设选择器就能选到它；加载失败会在面板列出 `broken` 诊断。
 
@@ -374,6 +374,20 @@ Deploy Key 按预设保存到 `$DSH_HOME/storages/dsh-utils-workbench/<preset>.k
 - 同步清单在 `$DSH_HOME/storages/dsh-utils-workbench/shared-presets.json`（600），用于显示「已接管」与上次同步时间；
 - 状态：`new`（本地没有）、`update`（文件内容不同）、`same`（已一致）、`invalid`（id 不合法，拒绝同步）。
 
+#### 原生预设接管与发布
+
+DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `standard`/`ptc`，或 `dsh-butler-preset` 这类 bundle）。面板的「原生预设接管」会列出注册表里的全部声明：
+
+- `builtinPresets`（默认 `standard`、`ptc`、`minimal`、`creator`）保留原生，不导入；
+- 其余声明若是「可导入」，点「导入到本地预设」后调用注册表的 `readDocument(id)`，把组合 YAML 写成 `$DSH_HOME/.agent-presets/<id>/agent.cordis.yml`，并把 name/description 写进 `preset.yml`（已存在的目录默认跳过，避免覆盖本地修改）；
+- 导入后由 legacy 桥在下一次刷新时注册；不会删除/停用任何原生声明。
+
+「发布非内置预设」把本机所有非内置目录预设复制到共享仓库的 `.dsh/preset/<id>/`，然后：
+
+- 只 `git add` / `git commit` 路径 `.dsh/preset`，不碰仓库里的其他改动；
+- 勾选推送时执行 `git push origin HEAD:<分支>`，分支必须等于共享仓库配置里的分支；
+- 共享仓库必须是已拉取的 Git checkout；提交信息可自定义，默认 `presets: sync from dsh-utils`。
+
 路由（Connection owner 认证）：
 
 | 方法 | 路径 | 作用 |
@@ -390,6 +404,9 @@ Deploy Key 按预设保存到 `$DSH_HOME/storages/dsh-utils-workbench/<preset>.k
 | `GET / POST` | `/api/dsh-utils/workbench/shared-repo` | 读/存共享技能仓库设置（与旧全局路由同一份存储） |
 | `POST` | `/api/dsh-utils/workbench/shared-key` | `{key}`，保存或清除共享仓库 Deploy Key |
 | `POST` | `/api/dsh-utils/workbench/shared-pull` | 用配置的 Deploy Key clone 或快进共享技能仓库 |
+| `GET` | `/api/dsh-utils/workbench/native-presets` | 列出注册表里的预设及内置/已目录/可导入状态 |
+| `POST` | `/api/dsh-utils/workbench/native-presets-import` | `{ids?, force?}`，把非内置声明导出为目录预设 |
+| `POST` | `/api/dsh-utils/workbench/presets-publish` | `{ids?, message?, push?}`，发布到共享仓库并提交/推送 |
 
 配置（全 volatile，保存即生效）：
 
@@ -398,6 +415,7 @@ Deploy Key 按预设保存到 `$DSH_HOME/storages/dsh-utils-workbench/<preset>.k
 | `maxBytes` | `524288` | 单文件读写上限（字节） |
 | `presetDirs` | `[]` | 额外的预设根目录；每个子目录视为一个预设 |
 | `presetSourceDirs` | `[]` | 额外的共享预设来源（技能仓库绝对路径）；读取其 `.dsh` 下的预设 |
+| `builtinPresets` | `['standard','ptc','minimal','creator']` | 保留为原生的预设 id；其余声明可导入为目录预设 |
 | `extraAgentsFiles` | `[]` | 全局视图额外暴露的 AGENTS.md 类绝对路径 |
 | `scanNestedAgents` | `false` | 全局视图递归寻找嵌套 AGENTS.md |
 | `nestedDepth` | `3` | 全局视图递归深度 |

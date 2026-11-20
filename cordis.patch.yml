@@ -72,6 +72,12 @@
         presetDirs: []
         # 额外的共享预设来源（技能仓库）；读取其 .dsh 下的预设，供面板同步。
         presetSourceDirs: []
+        # 保留为原生的预设 id；其余原生声明可导入成目录预设并发布到共享仓库。
+        builtinPresets:
+          - standard
+          - ptc
+          - minimal
+          - creator
         # 全局 / 项目 AGENTS.md 视图的额外文件与递归扫描。
         extraAgentsFiles: []
         scanNestedAgents: false

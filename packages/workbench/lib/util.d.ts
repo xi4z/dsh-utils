@@ -30,6 +30,7 @@ export interface WorkbenchConfig {
     readonly maxBytes?: MaybeRef<number>;
     readonly presetDirs?: MaybeRef<readonly string[]>;
     readonly presetSourceDirs?: MaybeRef<readonly string[]>;
+    readonly builtinPresets?: MaybeRef<readonly string[]>;
     readonly extraAgentsFiles?: MaybeRef<readonly string[]>;
     readonly scanNestedAgents?: MaybeRef<boolean>;
     readonly nestedDepth?: MaybeRef<number>;
@@ -41,6 +42,7 @@ export interface Options {
     readonly maxBytes: number;
     readonly presetDirs: string[];
     readonly presetSourceDirs: string[];
+    readonly builtinPresets: string[];
     readonly extraAgentsFiles: string[];
     readonly scanNestedAgents: boolean;
     readonly nestedDepth: number;

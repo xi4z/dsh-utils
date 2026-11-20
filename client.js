@@ -95,6 +95,7 @@ window.__ModuleLoader__.load({
       { key: 'maxBytes', label: '单文件大小上限（字节）', kind: 'number', min: 1024, hint: '读取和写入都受这个上限约束；超过时面板会提示。' },
       { key: 'presetDirs', label: '额外预设目录', kind: 'lines', hint: '每行一个绝对路径；目录下每个子目录视为一个预设。' },
       { key: 'presetSourceDirs', label: '额外共享预设来源', kind: 'lines', hint: '每行一个技能仓库绝对路径；读取其 .dsh 下的预设供同步。' },
+      { key: 'builtinPresets', label: '保留原生的预设 id', kind: 'lines', hint: '每行一个 id；其余原生声明可通过“预设同步”导入为目录预设。' },
       { key: 'extraAgentsFiles', label: '额外 AGENTS 文件', kind: 'lines', hint: '全局视图额外列出的绝对路径；每行一个。' },
       { key: 'scanNestedAgents', label: '递归寻找嵌套 AGENTS.md', kind: 'boolean', hint: '在项目当前目录下继续向下寻找 AGENTS.md / CLAUDE.md。' },
       { key: 'nestedDepth', label: '嵌套扫描深度', kind: 'number', min: 1, hint: '递归寻找嵌套文件的目录深度。' },
@@ -856,6 +857,28 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** Normalize the native-preset takeover view. */
+    function wbNative(body) {
+      const value = body !== null && typeof body === 'object' ? body : {}
+      const rows = Array.isArray(value.presets) ? value.presets : []
+      return {
+        builtin: Array.isArray(value.builtin) ? value.builtin.filter(function (id) { return typeof id === 'string' }) : [],
+        localRoot: wbText(value.localRoot),
+        presets: rows
+          .filter(function (row) { return row !== null && typeof row === 'object' && typeof row.id === 'string' && row.id !== '' })
+          .map(function (row) {
+            return {
+              id: row.id,
+              name: wbText(row.name) || row.id,
+              description: wbText(row.description),
+              builtin: row.builtin === true,
+              directory: row.directory === true,
+              importable: row.importable === true,
+            }
+          }),
+      }
+    }
+
     /** Normalize the shared-preset status. */
     function wbSharedStatus(value) {
       return value === 'new' || value === 'update' || value === 'same' || value === 'invalid' ? value : 'invalid'
@@ -1014,6 +1037,9 @@ window.__ModuleLoader__.load({
       const [sharedRepoState, setSharedRepoState] = React.useState('idle')
       const [sharedRepoDraft, setSharedRepoDraft] = React.useState(null)
       const [sharedRepoKeyDraft, setSharedRepoKeyDraft] = React.useState('')
+      const [nativeView, setNativeView] = React.useState(null)
+      const [publishMessage, setPublishMessage] = React.useState('presets: sync from dsh-utils')
+      const [publishPush, setPublishPush] = React.useState(true)
       const [keyDraft, setKeyDraft] = React.useState('')
       const [busy, setBusy] = React.useState('')
       const [error, setError] = React.useState('')
@@ -1142,6 +1168,20 @@ window.__ModuleLoader__.load({
           setSharedRepoDraft(null)
           setSharedRepoState('error')
           setError(messageOf(failure))
+        })
+        return function () { cancelled = true }
+      }, [selectedId, sharedKey, reloadKey])
+
+      React.useEffect(function () {
+        if (selectedId === '' || selectedId === GLOBAL_PRESET) {
+          setNativeView(null)
+          return undefined
+        }
+        let cancelled = false
+        wbRequest('native-presets', {}).then(function (body) {
+          if (!cancelled) setNativeView(wbNative(body))
+        }).catch(function () {
+          if (!cancelled) setNativeView(null)
         })
         return function () { cancelled = true }
       }, [selectedId, sharedKey, reloadKey])
@@ -1504,6 +1544,47 @@ window.__ModuleLoader__.load({
         }
       }
 
+      const importNative = async function (ids) {
+        if (busy !== '') return
+        setBusy('native')
+        setError('')
+        setNotice('')
+        try {
+          const result = await wbRequest('native-presets-import', { body: { ids: ids === null ? [] : ids } })
+          setNativeView(wbNative(result.view))
+          const rows = Array.isArray(result.results) ? result.results : []
+          const imported = rows.filter(function (row) { return row.status === 'imported' }).length
+          const existed = rows.filter(function (row) { return row.status === 'exists' }).length
+          const failed = rows.filter(function (row) { return row.status === 'error' })
+          if (failed.length > 0) setError('部分预设导入失败：' + failed.map(function (row) { return row.id + '：' + row.error }).join('；'))
+          else setNotice('导入完成：新导入 ' + imported + ' 个' + (existed > 0 ? '，已存在 ' + existed + ' 个' : ''))
+          setReloadKey(function (key) { return key + 1 })
+          setSharedKey(function (key) { return key + 1 })
+        } catch (failure) {
+          setError(messageOf(failure))
+        } finally {
+          setBusy('')
+        }
+      }
+
+      const publishPresets = async function () {
+        if (busy !== '') return
+        setBusy('publish')
+        setError('')
+        setNotice('')
+        try {
+          const result = await wbRequest('presets-publish', { body: { message: publishMessage, push: publishPush } })
+          const ids = Array.isArray(result.results) ? result.results.map(function (row) { return row.id }) : []
+          const commit = wbText(result.commit)
+          setNotice('发布完成：' + ids.length + ' 个预设' + (commit === '' ? '，没有变更' : '，commit ' + commit.slice(0, 7)) + (result.pushed === true ? '，已推送' : ''))
+          setSharedKey(function (key) { return key + 1 })
+        } catch (failure) {
+          setError(messageOf(failure))
+        } finally {
+          setBusy('')
+        }
+      }
+
       const children = [
         h('div', { className: 'dswb-head', key: 'head' }, [
           h('h3', { className: 'dswb-title', key: 'title' }, 'Utils'),
@@ -1706,6 +1787,61 @@ window.__ModuleLoader__.load({
                 h('p', { className: 'dswb-note', key: 'hint' }, '拉取后，仓库根目录的 .dsh/preset 会出现在下面的来源列表。'),
               ]))
             }
+            if (nativeView !== null) {
+              const importable = nativeView.presets.filter(function (row) { return row.importable }).length
+              const nativeRows = nativeView.presets.map(function (row) {
+                return h('div', { className: 'dswb-skill', key: 'np:' + row.id }, [
+                  h('div', { className: 'dswb-skillHead', key: 'head' }, [
+                    h('span', { className: 'dswb-skillName', key: 'name' }, row.name),
+                    h('span', {
+                      className: 'dswb-badge ' + (row.builtin || row.directory ? 'dswb-badgeOff' : 'dswb-badgeOn'),
+                      key: 'state',
+                    }, row.builtin ? '内置 · 保留' : row.directory ? '已是目录预设' : '可导入'),
+                  ]),
+                  h('span', { className: 'dswb-skillPath', key: 'id' }, row.id),
+                  row.importable ? h('div', { className: 'dswb-skillActions', key: 'actions' }, [
+                    h('button', {
+                      className: 'dswb-linkBtn', key: 'import', type: 'button',
+                      disabled: busy !== '', onClick: function () { importNative([row.id]) },
+                    }, '导入到本地预设'),
+                  ]) : null,
+                ])
+              })
+              nativeRows.push(h('div', { className: 'dswb-actions', key: 'importAll' }, [
+                h('button', {
+                  className: 'dswb-btn', key: 'all', type: 'button',
+                  disabled: busy !== '' || importable === 0, onClick: function () { importNative(null) },
+                }, busy === 'native' ? '导入中…' : '导入全部非内置（' + importable + '）'),
+              ]))
+              body.push(h('div', { className: 'dswb-kv', key: 'native' }, [
+                h('p', { className: 'dswb-note', key: 'title' }, '原生预设接管'),
+                h('p', { className: 'dswb-note', key: 'builtin' }, '保留原生：' + (nativeView.builtin.length === 0 ? '无' : nativeView.builtin.join(', '))),
+              ].concat(nativeRows)))
+            }
+            body.push(h('div', { className: 'dswb-kv', key: 'publish' }, [
+              h('p', { className: 'dswb-note', key: 'title' }, '发布到共享仓库（.dsh/preset）'),
+              h('label', { className: 'dswb-field', key: 'message' }, [
+                h('span', { className: 'dswb-label' }, '提交信息'),
+                h('input', {
+                  className: 'dswb-input', value: publishMessage,
+                  onChange: function (event) { setPublishMessage(event.target.value) },
+                }),
+              ]),
+              h('label', { className: 'dswb-check', key: 'push' }, [
+                h('input', {
+                  type: 'checkbox', checked: publishPush,
+                  onChange: function (event) { setPublishPush(event.target.checked) },
+                }),
+                '提交后推送到 origin',
+              ]),
+              h('div', { className: 'dswb-actions', key: 'actions' }, [
+                h('button', {
+                  className: 'dswb-btn dswb-primary', key: 'go', type: 'button',
+                  disabled: busy !== '', onClick: publishPresets,
+                }, busy === 'publish' ? '发布中…' : '发布非内置预设'),
+              ]),
+              h('p', { className: 'dswb-note', key: 'hint' }, '只提交共享仓库的 .dsh/preset；需先在上面配置并拉取共享技能仓库。'),
+            ]))
             body.push(h('div', { className: 'dswb-actions', key: 'sharedActions' }, [
               h('button', {
                 className: 'dswb-btn dswb-primary', key: 'syncAll', type: 'button',

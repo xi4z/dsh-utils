@@ -41,6 +41,7 @@ export function normalizeOptions(config) {
         maxBytes: clamp(refValue(config?.maxBytes, DEFAULT_MAX_BYTES), 1024, BODY_LIMIT_BYTES),
         presetDirs: stringList(refValue(config?.presetDirs, [])),
         presetSourceDirs: stringList(refValue(config?.presetSourceDirs, [])),
+        builtinPresets: stringList(refValue(config?.builtinPresets, ['standard', 'ptc', 'minimal', 'creator'])),
         extraAgentsFiles: stringList(refValue(config?.extraAgentsFiles, [])),
         scanNestedAgents: refValue(config?.scanNestedAgents, false) === true,
         nestedDepth: clamp(refValue(config?.nestedDepth, 3), 1, 8),

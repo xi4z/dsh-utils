@@ -51,3 +51,5 @@ export declare function pullSharedRepo(ctx: Context, options: Options): Promise<
 export declare function sharedRepoStatePath(): string;
 /** The legacy deploy-key path shared with the old global route. */
 export declare function sharedStoredKeyPath(): string;
+/** The SSH identity for the shared repository. */
+export declare function sharedKeyStatus(state: SharedRepoState): Promise<KeyStatus>;
