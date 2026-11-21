@@ -3,7 +3,7 @@
 # Everything ships in ONE package. The root package owns the patch + locale +
 # icon + browser bundle (client.js) and the `utils-main` component, and the
 # other four components are mounted as **subpath rows** of that same package
-# (`@xi4z/dsh-utils/workbench`), resolved through this package's `exports`.
+# (`@xi4z/dsh-utils/utils-agents`), resolved through this package's `exports`.
 # A subpath row is not a package: DSH never reads its `package.json`; its display
 # title comes from the exported `./<subpath>/locale/*.json`. The upside is that
 # the manifest has no `@xi4z/*` dependencies at all, so the bundle installs from
@@ -17,7 +17,7 @@
 #   utils-main           — the root package itself: recursive SKILL.md discovery
 #                          in nested skill folders, plus the legacy global
 #                          skill-repository JSON routes (their UI moved into
-#                          dsh-workbench) and the browser half (client.js).
+#                          utils-agents) and the browser half (client.js).
 #   dsh-approval-policy  — unattended approval gate: subagent/scheduled/cron
 #                          approval requests wait a bounded window, then settle
 #                          with a fail-closed default instead of hanging forever.
@@ -28,11 +28,12 @@
 #                          current session can read and hides disabled ones from
 #                          the model catalog while keeping them manually
 #                          invocable.
-#   dsh-workbench        — preset workbench: registers each
+#   utils-agents         — the agents/presets panel: registers each
 #                          ~/.dsh/.agent-presets/<id>/ directory as a real
 #                          agent preset through cordis:include, then serves
 #                          routes that list/toggle its skills, edit its
-#                          Markdown, and sync a Git repository into it.
+#                          Markdown, and clone/fast-forward a Git repository
+#                          (public or private, via a Deploy Key) into it.
 #
 # Row ids double as settings namespaces and stay stable.
 
@@ -69,8 +70,8 @@
       config:
         # 模型技能目录里隐藏的技能名；面板开关写入这里，热生效。
         disabledSkills: []
-    - id: dsh-workbench
-      name: '@xi4z/dsh-utils/workbench'
+    - id: utils-agents
+      name: '@xi4z/dsh-utils/utils-agents'
       config:
         # 单文件读写上限（字节）。AGENTS.md 本质上也是提示词，别放太大。
         maxBytes: 524288

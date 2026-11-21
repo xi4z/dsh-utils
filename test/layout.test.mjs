@@ -4,7 +4,7 @@
  * The repository ships ONE installable package: the root package owns the patch
  * layer, locale, assets, the browser bundle and the `utils-main` component, and
  * mounts the other four components as **subpath rows** of itself
- * (`@xi4z/dsh-utils/workbench`). A subpath row is not a package — DSH never
+ * (`@xi4z/dsh-utils/utils-agents`). A subpath row is not a package — DSH never
  * reads its `package.json` and takes its display title from the exported
  * `./<subpath>/locale/*.json` — so the root manifest must export both the row
  * entry and its locale, and must carry no `@xi4z/*` dependencies: that is what
@@ -22,7 +22,7 @@ import { join } from 'node:path'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const BUNDLE = '@xi4z/dsh-utils'
-const COMPONENTS = ['approval-policy', 'workbench', 'notify', 'skill-panel']
+const COMPONENTS = ['approval-policy', 'utils-agents', 'notify', 'skill-panel']
 
 async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'))
@@ -104,7 +104,7 @@ test('every patch row names this package, directly or as a subpath', async () =>
       { id: 'dsh-approval-policy', name: `${manifest.name}/approval-policy` },
       { id: 'dsh-notify', name: `${manifest.name}/notify` },
       { id: 'dsh-skill-panel', name: `${manifest.name}/skill-panel` },
-      { id: 'dsh-workbench', name: `${manifest.name}/workbench` },
+      { id: 'utils-agents', name: `${manifest.name}/utils-agents` },
       { id: 'utils-main', name: manifest.name },
     ],
   )

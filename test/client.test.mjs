@@ -231,7 +231,7 @@ const NOTIFY_VALUE = {
   approvalTemplate: '',
 }
 
-function fakeCtx({ served = ['utils-main', 'dsh-approval-policy', 'dsh-notify', 'dsh-skill-panel', 'dsh-workbench'], skillValue, approvalValue, notifyValue, panelValue, workbenchValue, skillOptions, approvalOptions, notifyOptions, panelOptions, workbenchOptions } = {}) {
+function fakeCtx({ served = ['utils-main', 'dsh-approval-policy', 'dsh-notify', 'dsh-skill-panel', 'utils-agents'], skillValue, approvalValue, notifyValue, panelValue, workbenchValue, skillOptions, approvalOptions, notifyOptions, panelOptions, workbenchOptions } = {}) {
   const skillForm = fakeForm(skillValue ?? {
     minDepth: 1,
     maxDepth: 8,
@@ -272,7 +272,7 @@ function fakeCtx({ served = ['utils-main', 'dsh-approval-policy', 'dsh-notify', 
         if (namespace === 'utils-main') return skillForm
         if (namespace === 'dsh-notify') return notifyForm
         if (namespace === 'dsh-skill-panel') return panelForm
-        if (namespace === 'dsh-workbench') return workbenchForm
+        if (namespace === 'utils-agents') return workbenchForm
         return approvalForm
       },
       whileServed: (namespaces, register) => {
@@ -348,7 +348,7 @@ test('the client half registers one configuration page per mounted row', async (
     'plugins.row.config:@xi4z/dsh-utils#dsh-approval-policy',
     'plugins.row.config:@xi4z/dsh-utils#dsh-notify',
     'plugins.row.config:@xi4z/dsh-utils#dsh-skill-panel',
-    'plugins.row.config:@xi4z/dsh-utils#dsh-workbench',
+    'plugins.row.config:@xi4z/dsh-utils#utils-agents',
     'plugins.row.config:@xi4z/dsh-utils#utils-main',
   ])
 })
@@ -639,19 +639,19 @@ test('the right-sidebar type and its keyed body are registered together', async 
   const { tabTypes, registrations } = await mountClient()
 
   assert.equal(tabTypes.length, 1)
-  const definition = tabTypes.find((tab) => tab.id === 'utils-workbench')
+  const definition = tabTypes.find((tab) => tab.id === 'utils-agents')
   assert.ok(definition, 'the Utils tab type is registered')
-  assert.equal(definition.kind, 'utils-workbench')
-  assert.equal(definition.title(), 'Utils')
+  assert.equal(definition.kind, 'utils-agents')
+  assert.equal(definition.title(), 'utils-agents')
   assert.equal(definition.guide.length, 1)
-  assert.equal(definition.guide[0].id, 'utils-workbench')
+  assert.equal(definition.guide[0].id, 'utils-agents')
   assert.equal(definition.guide[0].order, 30)
-  assert.equal(definition.guide[0].title(), 'Utils')
+  assert.equal(definition.guide[0].title(), 'utils-agents')
   assert.equal(typeof definition.guide[0].description(), 'string')
 
-  const body = registrations.find(({ options }) => options.name === 'sidebar.right.pane.tab' && options.key === 'utils-workbench')
-  assert.ok(body, 'the keyed Utils pane body is registered')
-  assert.equal(body.options.key, 'utils-workbench')
+  const body = registrations.find(({ options }) => options.name === 'sidebar.right.pane.tab' && options.key === 'utils-agents')
+  assert.ok(body, 'the keyed utils-agents pane body is registered')
+  assert.equal(body.options.key, 'utils-agents')
 })
 
 test('skills panel: lists the session catalog with counts and the session query', async () => {
@@ -822,7 +822,7 @@ test('skills panel: an empty catalog says so instead of rendering a bare list', 
 })
 
 
-// ----------------------------------------------------------- workbench --
+// ---------------------------------------------------------- utils-agents --
 
 const WB_LIST = {
   sessionId: 'sess-1',
@@ -955,7 +955,7 @@ function wbFileOf(id) {
 async function mountWorkbench({ handler } = {}) {
   const mounted = await mountClient()
   const page = mounted.registrations.find(
-    ({ options }) => options.name === 'sidebar.right.pane.tab' && options.key === 'utils-workbench',
+    ({ options }) => options.name === 'sidebar.right.pane.tab' && options.key === 'utils-agents',
   ).component
   assert.ok(page, 'the Utils pane body is registered')
   const requested = []
@@ -976,6 +976,10 @@ async function mountWorkbench({ handler } = {}) {
       return jsonResponse(WB_REPO)
     }
     if (entry.path.endsWith('/key')) return jsonResponse({ key: { source: entry.body.key === '' ? 'none' : 'stored', hasStoredKey: entry.body.key !== '' }, state: WB_REPO.state })
+    if (entry.path.endsWith('/deploy-key')) {
+      if (entry.method === 'POST') return jsonResponse({ key: { source: entry.body.key === '' ? 'none' : 'global', hasStoredKey: entry.body.key !== '' } })
+      return jsonResponse({ key: { source: 'none', hasStoredKey: false } })
+    }
     if (entry.path.endsWith('/sync')) return jsonResponse({ ...WB_REPO, state: { ...WB_REPO.state, lastSync: { at: '2026-11-20T00:00:00.000Z', ok: true, commit: 'abcdef1234567890', skills: 2, message: '已 clone 分支 Agent' } } })
     if (entry.path.endsWith('/skill')) {
       const file = WB_FILES.files.find((candidate) => candidate.label === entry.body.path) ?? WB_FILES.files[1]
@@ -1025,7 +1029,7 @@ test('utils panel: lists presets, skills, and defaults to the session preset', a
     assert.equal(requested.some((entry) => entry.path.endsWith('/files') && entry.url.includes('presetId=demo')), true)
     assert.equal(requested.some((entry) => entry.path.endsWith('/repo') && entry.url.includes('presetId=demo')), true)
     const text = textOf(tree)
-    assert.match(text, /Utils/)
+    assert.match(text, /utils-agents/)
     assert.match(text, /Demo preset/)
     assert.match(text, /alpha/)
     assert.match(text, /beta/)
@@ -1109,11 +1113,36 @@ test('utils panel: repository tab saves settings and syncs', async () => {
   }
 })
 
-test('utils panel: 404 explains that the workbench row is not mounted', async () => {
+test('utils panel: saves the panel-wide Deploy Key and reports it', async () => {
+  const { tree, page, props, requested } = await mountWorkbench()
+  try {
+    const draft = wbField(tree, '通用 Deploy Key 私钥（保存后不回显）')
+    assert.equal(draft.props.value, '')
+    draft.props.onChange({ target: { value: '-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----\n' } })
+    let next = render(createElement(page, props))
+    await wbButton(next, '保存通用 Deploy Key').props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    next = render(createElement(page, props))
+    const saved = requested.find((entry) => entry.path.endsWith('/deploy-key') && entry.method === 'POST')
+    assert.ok(saved, 'a panel-wide deploy key write was sent')
+    assert.match(saved.body.key, /PRIVATE KEY/)
+    assert.match(textOf(next), /当前：已保存通用 Deploy Key/)
+    wbButton(next, '清除').props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    next = render(createElement(page, props))
+    const cleared = requested.filter((entry) => entry.path.endsWith('/deploy-key') && entry.method === 'POST')
+    assert.equal(cleared.at(-1).body.key, '')
+    assert.match(textOf(next), /当前：未设置/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('utils panel: 404 explains that the utils-agents row is not mounted', async () => {
   const { tree } = await mountWorkbench({ handler: () => jsonResponse({ error: 'not found' }, 404) })
   try {
     assert.match(textOf(tree), /HTTP 404/)
-    assert.match(textOf(tree), /dsh-workbench/)
+    assert.match(textOf(tree), /utils-agents/)
     assert.match(textOf(tree), /重启 dsh web/)
   } finally {
     clearPanelGlobals()

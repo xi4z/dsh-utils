@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "utils-agents",
+    "description": "Registers a preset directory as a real DSH agent preset, manages its skills, AGENTS.md and Git repository (private repositories pull with a per-repository or panel-wide Deploy Key), and syncs the shared presets a skill repository carries under .dsh."
+  }
+}

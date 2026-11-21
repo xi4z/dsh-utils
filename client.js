@@ -20,8 +20,8 @@ window.__ModuleLoader__.load({
     const APPROVAL_NS = 'dsh-approval-policy'
     const NOTIFY_NS = 'dsh-notify'
     const SKILL_PANEL_NS = 'dsh-skill-panel'
-    const WORKBENCH_NS = 'dsh-workbench'
-    const WB_TAB = 'utils-workbench'
+    const AGENTS_NS = 'utils-agents'
+    const WB_TAB = 'utils-agents'
     const ORIGINS = [
       ['subagent', '子智能体'],
       ['scheduled', '定时任务'],
@@ -91,7 +91,7 @@ window.__ModuleLoader__.load({
       { key: 'approvalTemplate', label: '授权模板', kind: 'textarea', hint: '额外可用 {tool} {reason}。' },
     ]
 
-    const WORKBENCH_FIELDS = [
+    const AGENTS_FIELDS = [
       { key: 'maxBytes', label: '单文件大小上限（字节）', kind: 'number', min: 1024, hint: '读取和写入都受这个上限约束；超过时面板会提示。' },
       { key: 'presetDirs', label: '额外预设目录', kind: 'lines', hint: '每行一个绝对路径；目录下每个子目录视为一个预设。' },
       { key: 'presetSourceDirs', label: '额外共享预设来源', kind: 'lines', hint: '每行一个技能仓库绝对路径；读取其 .dsh 下的预设供同步。' },
@@ -643,10 +643,10 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'dsp-root' }, children)
     }
 
-    // ----------------------------------------------------- utils workbench --
+    // ---------------------------------------------------- utils-agents ----
     //
     // One sidebar tab replaces the former 技能 / 技能仓库 / Markdown cards.
-    // A preset is one directory under ~/.dsh/.agent-presets; the workbench
+    // A preset is one directory under ~/.dsh/.agent-presets; the utils-agents panel
     // lists that preset's skills, edits its Markdown, and syncs a Git skill
     // repository into its skills/ directory. The special global target edits
     // the user/project AGENTS.md chain.
@@ -803,6 +803,24 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** Normalize one SSH key status. */
+    function wbKeyStatus(value) {
+      const key = value !== null && typeof value === 'object' ? value : {}
+      return {
+        source: wbText(key.source) || 'none',
+        hasStoredKey: key.hasStoredKey === true,
+      }
+    }
+
+    /** Human-readable SSH identity source. */
+    function wbKeyText(key) {
+      if (key === null || typeof key !== 'object') return '无'
+      if (key.source === 'path') return '密钥路径'
+      if (key.source === 'stored') return '已保存的 Deploy Key'
+      if (key.source === 'global') return '通用 Deploy Key'
+      return '无'
+    }
+
     /** Editable repository draft. */
     function wbRepoDraft(repo) {
       if (repo === null || typeof repo !== 'object') return null
@@ -941,12 +959,12 @@ window.__ModuleLoader__.load({
       return '额外来源'
     }
 
-    /** Host URL for one workbench action. */
+    /** Host URL for one utils-agents action. */
     function wbUrl(action, params) {
       const base = typeof document !== 'undefined' && typeof document.baseURI === 'string' && document.baseURI !== ''
         ? document.baseURI
         : 'http://localhost/'
-      const url = new URL('api/dsh-utils/workbench/' + action, base)
+      const url = new URL('api/dsh-utils/utils-agents/' + action, base)
       const values = params !== null && typeof params === 'object' ? params : {}
       Object.keys(values).forEach(function (key) {
         const value = values[key]
@@ -974,7 +992,7 @@ window.__ModuleLoader__.load({
       }
       if (response.status === 401) throw new Error('登录状态已过期，请刷新页面后重试。')
       if (response.status === 404) {
-        throw new Error('宿主还没有加载 Utils 工作台组件（HTTP 404）。请重启 dsh web；如果已重启，请在插件页确认 dsh-workbench 行已启用。')
+        throw new Error('宿主还没有加载 utils-agents 组件（HTTP 404）。请重启 dsh web；如果已重启，请在插件页确认 utils-agents 行已启用。')
       }
       let body = null
       try {
@@ -984,11 +1002,11 @@ window.__ModuleLoader__.load({
       }
       if (!response.ok) {
         const detail = body !== null && typeof body === 'object' && typeof body.error === 'string' ? body.error : ''
-        const failure = new Error('Utils 请求失败（HTTP ' + response.status + '）' + (detail === '' ? '' : '：' + detail))
+        const failure = new Error('utils-agents 请求失败（HTTP ' + response.status + '）' + (detail === '' ? '' : '：' + detail))
         failure.status = response.status
         throw failure
       }
-      if (body === null || typeof body !== 'object') throw new Error('Utils 返回了无法解析的数据。')
+      if (body === null || typeof body !== 'object') throw new Error('utils-agents 返回了无法解析的数据。')
       return body
     }
 
@@ -1013,8 +1031,8 @@ window.__ModuleLoader__.load({
       return parts.join(' · ')
     }
 
-    /** The unified Utils panel. */
-    function Workbench({ sessionId }) {
+    /** The unified utils-agents panel. */
+    function AgentsPanel({ sessionId }) {
       const [status, setStatus] = React.useState('loading')
       const [data, setData] = React.useState(null)
       const [selectedId, setSelectedId] = React.useState('')
@@ -1041,6 +1059,9 @@ window.__ModuleLoader__.load({
       const [publishMessage, setPublishMessage] = React.useState('presets: sync from dsh-utils')
       const [publishPush, setPublishPush] = React.useState(true)
       const [keyDraft, setKeyDraft] = React.useState('')
+      const [deployKey, setDeployKey] = React.useState(null)
+      const [deployKeyState, setDeployKeyState] = React.useState('loading')
+      const [deployKeyDraft, setDeployKeyDraft] = React.useState('')
       const [busy, setBusy] = React.useState('')
       const [error, setError] = React.useState('')
       const [notice, setNotice] = React.useState('')
@@ -1185,6 +1206,21 @@ window.__ModuleLoader__.load({
         })
         return function () { cancelled = true }
       }, [selectedId, sharedKey, reloadKey])
+
+      React.useEffect(function () {
+        let cancelled = false
+        setDeployKeyState('loading')
+        wbRequest('deploy-key', {}).then(function (body) {
+          if (cancelled) return
+          setDeployKey(wbKeyStatus(body.key))
+          setDeployKeyState('ready')
+        }).catch(function () {
+          if (cancelled) return
+          setDeployKey(null)
+          setDeployKeyState('unsupported')
+        })
+        return function () { cancelled = true }
+      }, [reloadKey])
 
       React.useEffect(function () {
         if (selectedFileId === '') {
@@ -1420,6 +1456,23 @@ window.__ModuleLoader__.load({
         }
       }
 
+      const saveDeployKey = async function (clear) {
+        if (busy !== '') return
+        setBusy('deploy-key')
+        setError('')
+        setNotice('')
+        try {
+          const result = await wbRequest('deploy-key', { body: { key: clear ? '' : deployKeyDraft } })
+          setDeployKey(wbKeyStatus(result.key))
+          setDeployKeyDraft('')
+          setNotice(clear ? '已清除通用 Deploy Key。' : '已保存通用 Deploy Key。')
+        } catch (failure) {
+          setError(messageOf(failure))
+        } finally {
+          setBusy('')
+        }
+      }
+
       const syncNow = async function () {
         if (preset === null || busy !== '') return
         setBusy('sync')
@@ -1587,7 +1640,7 @@ window.__ModuleLoader__.load({
 
       const children = [
         h('div', { className: 'dswb-head', key: 'head' }, [
-          h('h3', { className: 'dswb-title', key: 'title' }, 'Utils'),
+          h('h3', { className: 'dswb-title', key: 'title' }, 'utils-agents'),
           data !== null ? h('span', { className: 'dswb-count', key: 'count' }, presets.length + ' 个预设') : null,
           h('button', {
             className: 'dswb-refresh', key: 'refresh', type: 'button',
@@ -1778,7 +1831,7 @@ window.__ModuleLoader__.load({
                 h('div', { className: 'dswb-actions', key: 'keyActions' }, [
                   h('button', { className: 'dswb-btn', key: 'saveKey', type: 'button', disabled: busy !== '', onClick: function () { saveSharedRepoKey(false) } }, '保存 Deploy Key'),
                   h('button', { className: 'dswb-btn', key: 'clearKey', type: 'button', disabled: busy !== '', onClick: function () { saveSharedRepoKey(true) } }, '清除'),
-                  h('span', { className: 'dswb-status', key: 'keyState' }, '密钥来源：' + (sharedRepo.key.source === 'path' ? '密钥路径' : sharedRepo.key.source === 'stored' ? '已保存的 Deploy Key' : '无')),
+                  h('span', { className: 'dswb-status', key: 'keyState' }, '密钥来源：' + wbKeyText(sharedRepo.key)),
                 ]),
                 h('p', { className: 'dswb-note', key: 'target', title: sharedRepo.state.targetDir }, '检出：' + (sharedRepo.target.exists
                   ? (sharedRepo.target.isRepo ? '分支 ' + (sharedRepo.target.branch || '-') + ' · commit ' + sharedRepo.target.commit.slice(0, 7) + ' · 技能 ' + sharedRepo.target.skills + ' 个' : '目录存在但不是 Git 仓库')
@@ -1954,7 +2007,7 @@ window.__ModuleLoader__.load({
             body.push(h('div', { className: 'dswb-actions', key: 'keyActions' }, [
               h('button', { className: 'dswb-btn', key: 'saveKey', type: 'button', disabled: busy !== '', onClick: function () { saveKey(false) } }, '保存 Deploy Key'),
               h('button', { className: 'dswb-btn', key: 'clearKey', type: 'button', disabled: busy !== '', onClick: function () { saveKey(true) } }, '清除'),
-              h('span', { className: 'dswb-status', key: 'keyState' }, '密钥来源：' + (repo.key.source === 'path' ? '密钥路径' : repo.key.source === 'stored' ? '已保存的 Deploy Key' : '无')),
+              h('span', { className: 'dswb-status', key: 'keyState' }, '密钥来源：' + wbKeyText(repo.key)),
             ]))
             body.push(h('div', { className: 'dswb-kv', key: 'status' }, [
               h('p', { className: 'dswb-note', key: 'target' }, '目标：' + repo.target),
@@ -1967,6 +2020,31 @@ window.__ModuleLoader__.load({
         }
 
         children.push(h('div', { className: 'dswb-body', key: 'body' }, body))
+        if (deployKeyState !== 'unsupported') {
+          children.push(h('div', { className: 'dswb-kv', key: 'deployKey' }, [
+            h('p', { className: 'dswb-note', key: 'title' }, 'Deploy Key（拉取私有仓库）'),
+            h('label', { className: 'dswb-field', key: 'draft' }, [
+              h('span', { className: 'dswb-label' }, '通用 Deploy Key 私钥（保存后不回显）'),
+              h('textarea', {
+                className: 'dswb-textarea', value: deployKeyDraft,
+                onChange: function (event) { setDeployKeyDraft(event.target.value) },
+                placeholder: '粘贴 OpenSSH 私钥；留空并点“保存”等于清除。未配置密钥路径或该仓库自己的 Deploy Key 时使用。',
+              }),
+            ]),
+            h('div', { className: 'dswb-actions', key: 'actions' }, [
+              h('button', {
+                className: 'dswb-btn dswb-primary', key: 'save', type: 'button', disabled: busy !== '',
+                onClick: function () { saveDeployKey(false) },
+              }, busy === 'deploy-key' ? '保存中…' : '保存通用 Deploy Key'),
+              h('button', {
+                className: 'dswb-btn', key: 'clear', type: 'button', disabled: busy !== '',
+                onClick: function () { saveDeployKey(true) },
+              }, '清除'),
+              h('span', { className: 'dswb-status', key: 'state' }, '当前：' + (deployKeyState === 'loading' ? '读取中…' : deployKey !== null && deployKey.hasStoredKey ? '已保存通用 Deploy Key' : '未设置')),
+            ]),
+            h('p', { className: 'dswb-note', key: 'hint' }, '查找顺序：密钥路径 → 该仓库保存的 Deploy Key → 这里的通用 Deploy Key。HTTPS 地址在有密钥时改写为 SSH。'),
+          ]))
+        }
       }
 
       if (notice !== '') children.push(h('p', { className: 'dswb-ok', key: 'notice', role: 'status' }, notice))
@@ -1999,18 +2077,18 @@ window.__ModuleLoader__.load({
       } catch {
         skillPanelForm = null
       }
-      let workbenchForm = null
+      let agentsForm = null
       try {
-        workbenchForm = ctx.configForms.get(WORKBENCH_NS) || null
+        agentsForm = ctx.configForms.get(AGENTS_NS) || null
       } catch {
-        workbenchForm = null
+        agentsForm = null
       }
       ctx.effect(() => () => {
         skillForm.dispose()
         approvalForm.dispose()
         notifyForm.dispose()
         if (skillPanelForm) skillPanelForm.dispose()
-        if (workbenchForm) workbenchForm.dispose()
+        if (agentsForm) agentsForm.dispose()
       }, 'dsh-utils: configuration forms')
       const SkillRowPage = RowPage({
         form: skillForm, fields: SKILL_FIELDS,
@@ -2027,10 +2105,10 @@ window.__ModuleLoader__.load({
         title: '会话通知',
         intro: '会话结束、等待回答或等待授权时推送一条消息；出口是 Gotify 网关，多台设备共用一个 QQ 也能分清是谁。',
       })
-      const WorkbenchRowPage = workbenchForm === null ? null : RowPage({
-        form: workbenchForm, fields: WORKBENCH_FIELDS,
-        title: 'Utils 工作台',
-        intro: '右侧栏的 Utils 面板按预设统一管理 skills、技能仓库与 AGENTS.md。',
+      const AgentsRowPage = agentsForm === null ? null : RowPage({
+        form: agentsForm, fields: AGENTS_FIELDS,
+        title: 'utils-agents',
+        intro: '右侧栏的 utils-agents 面板按预设统一管理 skills、技能仓库与 AGENTS.md。',
       })
 
       // The row page and the right-sidebar body mount the same panel; the
@@ -2039,33 +2117,33 @@ window.__ModuleLoader__.load({
         h('style', { key: 'style' }, STYLE + PANEL_STYLE),
         h(SkillPanel, { key: 'panel', form: skillPanelForm }),
       ])
-      // One Utils tab now carries what used to be three separate sidebar
+      // One utils-agents tab now carries what used to be three separate sidebar
       // cards: preset skills, the per-preset skill repository, and Markdown.
-      const WorkbenchBody = (props) => h('div', { className: 'dswb-host' }, [
+      const AgentsBody = (props) => h('div', { className: 'dswb-host' }, [
         h('style', { key: 'style' }, WB_STYLE),
-        h(Workbench, { key: 'panel', sessionId: props?.['sessionId'] }),
+        h(AgentsPanel, { key: 'panel', sessionId: props?.['sessionId'] }),
       ])
 
       if (ctx.sidebarRightTabs && typeof ctx.sidebarRightTabs.register === 'function') {
         ctx.effect(() => ctx.sidebarRightTabs.register({
           id: WB_TAB,
           kind: WB_TAB,
-          title: () => 'Utils',
+          title: () => 'utils-agents',
           guide: [{
-            id: 'utils-workbench',
+            id: 'utils-agents',
             order: 30,
-            title: () => 'Utils',
+            title: () => 'utils-agents',
             description: () => '按预设管理技能、技能仓库与 AGENTS.md',
           }],
-        }), 'dsh-utils: workbench tab type')
+        }), 'dsh-utils: utils-agents tab type')
         ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
           name: 'sidebar.right.pane.tab', key: WB_TAB,
-        }, WorkbenchBody)), 'dsh-utils: workbench tab body')
+        }, AgentsBody)), 'dsh-utils: utils-agents tab body')
       }
 
       // Each component owns one page, keyed the way the Plugins page addresses a
       // row's configuration: `${bundle}#${rowId}`.
-      ctx.effect(() => ctx.configForms.whileServed([SKILL_NS, APPROVAL_NS, NOTIFY_NS, SKILL_PANEL_NS, WORKBENCH_NS], (served) => {
+      ctx.effect(() => ctx.configForms.whileServed([SKILL_NS, APPROVAL_NS, NOTIFY_NS, SKILL_PANEL_NS, AGENTS_NS], (served) => {
         const offs = []
         if (served.has(SKILL_NS)) {
           offs.push(ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
@@ -2087,10 +2165,10 @@ window.__ModuleLoader__.load({
             name: 'plugins.row.config', key: `${BUNDLE}#${SKILL_PANEL_NS}`,
           }, SkillPanelRowPage)))
         }
-        if (served.has(WORKBENCH_NS) && WorkbenchRowPage !== null) {
+        if (served.has(AGENTS_NS) && AgentsRowPage !== null) {
           offs.push(ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
-            name: 'plugins.row.config', key: `${BUNDLE}#${WORKBENCH_NS}`,
-          }, WorkbenchRowPage)))
+            name: 'plugins.row.config', key: `${BUNDLE}#${AGENTS_NS}`,
+          }, AgentsRowPage)))
         }
         return () => {
           for (const off of offs) off()

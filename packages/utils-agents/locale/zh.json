@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "utils-agents",
+    "description": "把一个预设目录注册成真正的 DSH agent preset，管理它的 skills、技能仓库与 AGENTS.md；私有仓库可用每仓库或面板通用的 Deploy Key 拉取，并把技能仓库 .dsh 下的共享预设同步到本机。"
+  }
+}

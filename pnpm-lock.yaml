@@ -94,7 +94,7 @@ importers:
         specifier: ~5.9.0
         version: 5.9.3
 
-  packages/workbench:
+  packages/utils-agents:
     dependencies:
       '@deepseek-ai/schemastery':
         specifier: ~3.19.0

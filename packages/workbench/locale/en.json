@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "Utils workbench",
-    "description": "Registers a preset directory as a real DSH agent preset, manages its skills, skill repository and AGENTS.md, and syncs the shared presets a skill repository carries under .dsh."
-  }
-}

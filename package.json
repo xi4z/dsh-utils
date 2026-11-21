@@ -1,7 +1,7 @@
 {
   "name": "@xi4z/dsh-utils",
   "version": "0.4.0",
-  "description": "DeepSeek Harness utility bundle: the root package carries the main component (recursive SKILL.md discovery, legacy Git skill-repository routes, and the browser UI) and mounts four components as its own subpaths (unattended approval gate, session notifications, skill panel, preset workbench with .dsh shared-preset sync). It declares no @xi4z dependencies, so one spec installs everything from a registry name, a Git URL, a packed tarball or a local directory.",
+  "description": "DeepSeek Harness utility bundle: the root package carries the main component (recursive SKILL.md discovery, legacy Git skill-repository routes, and the browser UI) and mounts four components as its own subpaths (unattended approval gate, session notifications, skill panel, and utils-agents: the preset/skill panel that also pulls private repositories with a Deploy Key). It declares no @xi4z dependencies, so one spec installs everything from a registry name, a Git URL, a packed tarball or a local directory.",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -11,7 +11,7 @@
     "skill-panel",
     "markdown",
     "agents-md",
-    "preset-workbench",
+    "utils-agents",
     "skill-discovery",
     "approval",
     "unattended",
@@ -62,12 +62,12 @@
       "default": "./packages/skill-panel/lib/index.js"
     },
     "./skill-panel/locale/*.json": "./packages/skill-panel/locale/*.json",
-    "./workbench": {
-      "types": "./packages/workbench/lib/index.d.ts",
-      "import": "./packages/workbench/lib/index.js",
-      "default": "./packages/workbench/lib/index.js"
+    "./utils-agents": {
+      "types": "./packages/utils-agents/lib/index.d.ts",
+      "import": "./packages/utils-agents/lib/index.js",
+      "default": "./packages/utils-agents/lib/index.js"
     },
-    "./workbench/locale/*.json": "./packages/workbench/locale/*.json",
+    "./utils-agents/locale/*.json": "./packages/utils-agents/locale/*.json",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
