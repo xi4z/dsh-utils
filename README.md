@@ -375,6 +375,33 @@ Deploy Key 按预设保存到 `$DSH_HOME/storages/dsh-utils-agents/<preset>.key`
 
 私钥写入 `$DSH_HOME/storages/dsh-utils-agents/deploy-key`（600），接口只回 `source`，从不回显内容；清空输入再点「保存/清除」即删除。HTTPS 地址在存在密钥时改写为 `git@<host>:<path>.git`；SSH 地址（`git@host:path`）直接用它。拉取仍然只读：clone 或 `fetch` + `merge --ff-only`，不 reset、不 push。
 
+#### 版本检查
+
+面板顶部显示当前 bundle 版本（如 `v0.4.1`）、安装来源徽标（npm / GitHub / 本地）和「检查更新」按钮。宿主按 `updateCheckIntervalHours`（默认 6 小时）在后台检查，激活后约 15 秒先查一次；远端比当前版本新时，按钮旁出现「有新版本 x.y.z」。
+
+查哪里取决于 profile 里 `@xi4z/dsh-utils` 的安装方式（读 profile 的 `package.json`）：
+
+| 安装方式 | 检查目标 |
+|---|---|
+| registry spec（`^0.4.0`、`latest` 等） | `<registry>/@xi4z%2Fdsh-utils/latest`（默认 `https://registry.npmjs.org`） |
+| GitHub spec（`github:owner/repo`、`owner/repo`、`git+https://…#ref`、`git@github.com:owner/repo`） | `https://raw.githubusercontent.com/<owner>/<repo>/<ref>/package.json`；`ref` 取 `#` 后的分支/tag/sha（默认 `HEAD`），公开仓库免 token |
+| `link:` / `file:` / 读不到 profile 清单 | 没有远端可比，标为「本地」，仍对比 npm `latest` 作参考 |
+
+**自动安装**（`updateAutoInstall`，默认开）：查到更新且安装方式可更新时，后台在 profile 目录执行：
+
+- registry 安装 → `pnpm add @xi4z/dsh-utils@<version> --save-exact`；
+- GitHub 安装 → `pnpm add <原来的 spec>`（分支/标签会重新解析到该 ref 的最新提交）；
+- 固定 40 位 commit 的 Git spec、`link:`、`file:` 一律跳过（没有可移动的远端）。
+
+安装失败会回滚 `package.json` 与 `pnpm-lock.yaml` 并显示原因；同一版本只自动装一次。装完必须重启 `dsh web` 才生效——面板显示「已自动更新到 x.y.z（重启 dsh web 生效）」，安装中会每 3 秒刷新一次状态。重启前浏览器刷新可能加载到新 `client.js` 而宿主还是旧代码，所以装完尽快重启。
+
+- 每次只请求一个 URL，8 秒超时；失败不重试、不弹窗，只把错误写进面板并保留上一次读到的版本。
+- 结果缓存到 `$DSH_HOME/storages/dsh-utils-agents/update.json`（600）：重启后先显示缓存，首次检查完成再覆盖。
+- 「检查更新」按钮立即查询；与后台检查撞车时复用同一个请求。
+- `updateCheck: false` 可完全关掉后台检查（按钮仍然可用）。
+- 私有 GitHub 仓库读不到（HTTP 404）时会显示「检查失败」，需要手动更新。
+- 不依赖 DSH 插件页的更新按钮：DSH 只把「固定 40 位 commit 的 Git spec」当作可更新（`update: 'git'`），分支/tag/`github:` 简写和 `link:`/`path:`/`tarball` 都不算，而且它不会去查远端有没有新 commit（需要你提供新的 pinned spec）。所以这里自己读远端 `package.json` 比版本。
+
 #### 共享预设同步（`.dsh`）
 
 跟踪技能的 Git 仓库可以顺带携带预设：仓库根下的 `.dsh/preset` 目录被当作只读来源，面板把其中的预设目录复制到本机 `$DSH_HOME/.agent-presets/<id>/`，同步完立即由 legacy 桥注册成真正的 agent preset。支持的布局：
@@ -440,6 +467,7 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
 | `POST` | `/api/dsh-utils/utils-agents/shared-key` | `{key}`，保存或清除共享仓库 Deploy Key |
 | `POST` | `/api/dsh-utils/utils-agents/shared-pull` | 用配置的 Deploy Key（或通用 Deploy Key）clone 或快进共享技能仓库 |
 | `GET / POST` | `/api/dsh-utils/utils-agents/deploy-key` | 读/存面板通用的 Deploy Key；只回 `source`，不回显内容 |
+| `GET / POST` | `/api/dsh-utils/utils-agents/update` | 读缓存/立即检查远端版本（npm 或 GitHub，按安装方式） |
 | `GET` | `/api/dsh-utils/utils-agents/native-presets` | 列出注册表里的预设及内置/已目录/可导入状态 |
 | `POST` | `/api/dsh-utils/utils-agents/native-presets-import` | `{ids?, force?}`，把非内置声明导出为目录预设 |
 | `POST` | `/api/dsh-utils/utils-agents/presets-publish` | `{ids?, message?, push?}`，发布到共享仓库并提交/推送 |
@@ -457,8 +485,12 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
 | `nestedDepth` | `3` | 全局视图递归深度 |
 | `defaultRepoUrl` | `https://github.com/xi4z/skills` | 新预设的默认仓库地址 |
 | `defaultBranch` | `Agent` | 新预设的默认分支 |
+| `updateCheck` | `true` | 后台定时检查 npm 上的发布版本 |
+| `updateCheckIntervalHours` | `6` | 两次自动检查之间的小时数（1–168） |
+| `updateRegistry` | `https://registry.npmjs.org` | 查询发布版本用的 registry，可换镜像 |
+| `updateAutoInstall` | `true` | 查到新版本就后台执行 `pnpm add` 自动安装（重启后生效） |
 
-宿主半侧在 `packages/utils-agents/src/`（`index.ts` 路由、`presets.ts` 预设/技能/文件、`git.ts` 仓库同步），浏览器半侧仍是根包的 `client.js`。停用 `utils-agents` 行后路由消失，侧边栏 utils-agents 面板显示 404 提示。
+宿主半侧在 `packages/utils-agents/src/`（`index.ts` 路由、`presets.ts` 预设/技能/文件、`git.ts` 仓库同步、`update.ts` 发布版本检查），浏览器半侧仍是根包的 `client.js`。停用 `utils-agents` 行后路由消失，侧边栏 utils-agents 面板显示 404 提示。
 
 ## 配置写法
 
@@ -494,6 +526,10 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
     nestedDepth: 3
     defaultRepoUrl: https://github.com/xi4z/skills
     defaultBranch: Agent
+    updateCheck: true
+    updateCheckIntervalHours: 6
+    updateRegistry: https://registry.npmjs.org
+    updateAutoInstall: true
 ```
 
 五个组件 id（`utils-main` + 四个 subpath 组件）同时是 settings 命名空间；配置写 `cordis.patch.yml`：bundle 给默认，profile 按 id 覆盖。根包声明 `dsh.client`，`utils-main` 这个包根行同时让宿主加载 `client.js`；插件页每个挂载项都有配置页，右侧栏只有一个 utils-agents 面板。组件启用/停用、运行状态照常显示。

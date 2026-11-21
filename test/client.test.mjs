@@ -976,6 +976,18 @@ async function mountWorkbench({ handler } = {}) {
       return jsonResponse(WB_REPO)
     }
     if (entry.path.endsWith('/key')) return jsonResponse({ key: { source: entry.body.key === '' ? 'none' : 'stored', hasStoredKey: entry.body.key !== '' }, state: WB_REPO.state })
+    if (entry.path.endsWith('/update')) {
+      if (entry.method === 'POST') {
+        return jsonResponse({
+          update: { current: '0.4.1', latest: '0.5.0', updateAvailable: true, source: 'npm', origin: 'https://registry.npmjs.org', checkedAt: '2026-11-21T00:00:00.000Z', attemptedAt: '2026-11-21T00:00:00.000Z', error: null },
+          schedule: { enabled: true, intervalHours: 6, registry: 'https://registry.npmjs.org' },
+        })
+      }
+      return jsonResponse({
+        update: { current: '0.4.1', latest: null, updateAvailable: false, source: 'npm', origin: 'https://registry.npmjs.org', checkedAt: null, attemptedAt: null, error: null },
+        schedule: { enabled: true, intervalHours: 6, registry: 'https://registry.npmjs.org' },
+      })
+    }
     if (entry.path.endsWith('/deploy-key')) {
       if (entry.method === 'POST') return jsonResponse({ key: { source: entry.body.key === '' ? 'none' : 'global', hasStoredKey: entry.body.key !== '' } })
       return jsonResponse({ key: { source: 'none', hasStoredKey: false } })
@@ -1108,6 +1120,48 @@ test('utils panel: repository tab saves settings and syncs', async () => {
     next = render(createElement(page, props))
     assert.equal(requested.some((entry) => entry.path.endsWith('/sync') && entry.method === 'POST'), true)
     assert.match(textOf(next), /已 clone 分支 Agent/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('utils panel: shows the running version and checks for updates', async () => {
+  const { tree, page, props, requested } = await mountWorkbench()
+  try {
+    assert.match(textOf(tree), /v0\.4\.1/)
+    assert.match(textOf(tree), /检查更新/)
+    wbButton(tree, '检查更新').props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    let next = render(createElement(page, props))
+    next = await settle(page, props)
+    const check = requested.find((entry) => entry.path.endsWith('/update') && entry.method === 'POST')
+    assert.ok(check, 'a version check request was sent')
+    assert.match(textOf(next), /有新版本 0\.5\.0/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+test('utils panel: reports an applied automatic update', async () => {
+  const { tree } = await mountWorkbench({
+    handler: (entry) => {
+      if (entry.path.endsWith('/update')) {
+        return jsonResponse({
+          update: {
+            current: '0.4.1', latest: '0.5.0', updateAvailable: true, source: 'npm',
+            origin: 'https://registry.npmjs.org', checkedAt: '2026-11-21T00:00:00.000Z',
+            attemptedAt: '2026-11-21T00:00:00.000Z', error: null,
+            install: { phase: 'installed', version: '0.5.0', message: '已安装，重启 dsh web 后生效', at: '2026-11-21T00:00:00.000Z' },
+          },
+          schedule: { enabled: true, intervalHours: 6, registry: 'https://registry.npmjs.org' },
+        })
+      }
+      return jsonResponse({ error: 'not found' }, 404)
+    },
+  })
+  try {
+    assert.match(textOf(tree), /已自动更新到 0\.5\.0/)
+    assert.match(textOf(tree), /重启 dsh web 生效/)
   } finally {
     clearPanelGlobals()
   }

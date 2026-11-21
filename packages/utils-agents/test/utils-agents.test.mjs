@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { promisify } from 'node:util'
 import { apply, ROUTE_PATHS } from '../lib/index.js'
+import { createUpdateChecker, installCommand, parseGitSpec } from '../lib/update.js'
 
 const runFile = promisify(execFile)
 const GIT_ENV = {
@@ -36,7 +37,7 @@ function fakeConnection() {
   }
 }
 
-function fakeCtx(connection, cwd, registry) {
+function fakeCtx(connection, cwd, registry, profileDir) {
   const effects = []
   const services = {
     connection,
@@ -44,10 +45,11 @@ function fakeCtx(connection, cwd, registry) {
     workingDirectory: { ensure: async () => cwd },
     agentPresets: registry,
   }
+  const servicesWithProfile = { ...services, profileContext: { dir: profileDir } }
   const ctx = {
     effects,
     get(name) {
-      return services[name]
+      return servicesWithProfile[name]
     },
     effect(execute, label) {
       effects.push({ label, disposer: execute() })
@@ -143,7 +145,7 @@ async function setup(t, options = {}) {
   process.env.DSH_HOME = home
   process.env.DSH_AGENTS_HOME = agentsHome
   const connection = fakeConnection()
-  const ctx = fakeCtx(connection, cwd, options.registry)
+  const ctx = fakeCtx(connection, cwd, options.registry, home)
   apply(ctx, { maxBytes: 4096, ...(options.config ?? {}) })
   t.after(async () => {
     await dispose(ctx)
@@ -321,6 +323,146 @@ test('stores a panel-wide deploy key that is the fallback for private repositori
   assert.equal(cleared.body.key.source, 'none')
   const afterClear = await call(connection, ROUTE_PATHS.sharedRepo)
   assert.equal(afterClear.body.key.source, 'none', 'the shared repository no longer reports a key')
+})
+
+test('checks the published bundle version on a timer and on demand', async (t) => {
+  const { home, connection } = await setup(t, { config: { updateCheck: false } })
+  const rootManifest = JSON.parse(await readFile(new URL('../../../package.json', import.meta.url), 'utf8'))
+  const original = globalThis.fetch
+  t.after(() => { globalThis.fetch = original })
+  const calls = []
+  globalThis.fetch = async (url) => {
+    calls.push(String(url))
+    return new Response(JSON.stringify({ version: '9.9.9' }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+
+  const initial = await call(connection, ROUTE_PATHS.update)
+  assert.equal(initial.response.status, 200, JSON.stringify(initial.body))
+  assert.equal(initial.body.update.current, rootManifest.version)
+  assert.equal(initial.body.update.source, 'local', 'no profile manifest treats the bundle as a local install')
+  assert.equal(initial.body.update.latest, null)
+  assert.equal(initial.body.update.updateAvailable, false)
+  assert.equal(initial.body.schedule.enabled, false)
+
+  const checked = await call(connection, ROUTE_PATHS.update, { method: 'POST', body: {} })
+  assert.equal(checked.response.status, 200, JSON.stringify(checked.body))
+  assert.equal(checked.body.update.latest, '9.9.9')
+  assert.equal(checked.body.update.updateAvailable, true)
+  assert.equal(checked.body.update.error, null)
+  assert.equal(calls[0], 'https://registry.npmjs.org/' + rootManifest.name.replace('/', '%2F') + '/latest')
+  const cached = JSON.parse(await readFile(join(home, 'storages', 'dsh-utils-agents', 'update.json'), 'utf8'))
+  assert.equal(cached.latest, '9.9.9')
+  assert.equal(cached.updateAvailable, true)
+
+  globalThis.fetch = async () => { throw new Error('offline') }
+  const failed = await call(connection, ROUTE_PATHS.update, { method: 'POST', body: {} })
+  assert.equal(failed.response.status, 200)
+  assert.equal(failed.body.update.latest, '9.9.9', 'a failed check keeps the last known version')
+  assert.match(failed.body.update.error, /offline/)
+
+  globalThis.fetch = async () => new Response(JSON.stringify({ version: '0.0.1' }), { status: 200, headers: { 'content-type': 'application/json' } })
+  const older = await call(connection, ROUTE_PATHS.update, { method: 'POST', body: {} })
+  assert.equal(older.body.update.latest, '0.0.1')
+  assert.equal(older.body.update.updateAvailable, false)
+  assert.equal(older.body.update.error, null)
+})
+
+test('checks a GitHub install against the repository manifest', async (t) => {
+  const { home, connection } = await setup(t, { config: { updateAutoInstall: false } })
+  await writeFile(join(home, 'package.json'), JSON.stringify({ dependencies: { '@xi4z/dsh-utils': 'github:xi4z/dsh-utils#main' } }, null, 2))
+  const original = globalThis.fetch
+  t.after(() => { globalThis.fetch = original })
+  const calls = []
+  globalThis.fetch = async (url) => {
+    calls.push(String(url))
+    return new Response(JSON.stringify({ version: '9.9.9' }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  const checked = await call(connection, ROUTE_PATHS.update, { method: 'POST', body: {} })
+  assert.equal(checked.response.status, 200, JSON.stringify(checked.body))
+  assert.equal(checked.body.update.source, 'git')
+  assert.equal(checked.body.update.origin, 'https://raw.githubusercontent.com/xi4z/dsh-utils/main/package.json')
+  assert.equal(checked.body.update.latest, '9.9.9')
+  assert.equal(checked.body.update.updateAvailable, true)
+  assert.equal(calls[0], checked.body.update.origin)
+  const cached = JSON.parse(await readFile(join(home, 'storages', 'dsh-utils-agents', 'update.json'), 'utf8'))
+  assert.equal(cached.source, 'git')
+  assert.equal(cached.origin, 'https://raw.githubusercontent.com/xi4z/dsh-utils/main/package.json')
+})
+
+test('auto-installs a newer registry version in the background', async (t) => {
+  const { home } = await setup(t, { config: { updateCheck: false, updateAutoInstall: false } })
+  await writeFile(join(home, 'package.json'), JSON.stringify({ dependencies: { '@xi4z/dsh-utils': '^0.4.0' } }, null, 2))
+  const original = globalThis.fetch
+  t.after(() => { globalThis.fetch = original })
+  globalThis.fetch = async () => new Response(JSON.stringify({ version: '9.9.9' }), { status: 200, headers: { 'content-type': 'application/json' } })
+  const commands = []
+  const ctx = { get: (name) => name === 'profileContext' ? { dir: home } : undefined, logger: { warn() {} } }
+  const checker = createUpdateChecker(ctx, () => ({ updateRegistry: 'https://registry.npmjs.org', updateAutoInstall: true }), async (command) => {
+    commands.push(command)
+  })
+
+  const running = await checker.check()
+  assert.equal(running.updateAvailable, true)
+  assert.equal(running.install.phase, 'installing')
+  assert.equal(running.install.version, '9.9.9')
+
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  const done = await checker.status()
+  assert.equal(done.install.phase, 'installed')
+  assert.equal(done.install.version, '9.9.9')
+  assert.equal(commands.length, 1)
+  assert.deepEqual(commands[0], { dir: home, spec: '@xi4z/dsh-utils@9.9.9', exact: true })
+  const cached = JSON.parse(await readFile(join(home, 'storages', 'dsh-utils-agents', 'update.json'), 'utf8'))
+  assert.equal(cached.install.phase, 'installed')
+})
+
+test('a failed auto-install is reported and the profile manifest is restored', async (t) => {
+  const { home } = await setup(t, { config: { updateCheck: false, updateAutoInstall: false } })
+  const manifest = JSON.stringify({ dependencies: { '@xi4z/dsh-utils': '^0.4.0' } }, null, 2)
+  await writeFile(join(home, 'package.json'), manifest)
+  const original = globalThis.fetch
+  t.after(() => { globalThis.fetch = original })
+  globalThis.fetch = async () => new Response(JSON.stringify({ version: '9.9.9' }), { status: 200, headers: { 'content-type': 'application/json' } })
+  const ctx = { get: (name) => name === 'profileContext' ? { dir: home } : undefined, logger: { warn() {} } }
+  const checker = createUpdateChecker(ctx, () => ({ updateRegistry: 'https://registry.npmjs.org', updateAutoInstall: true }), async (command) => {
+    await writeFile(join(command.dir, 'package.json'), '{"broken":true}')
+    throw new Error('network down')
+  })
+
+  await checker.check()
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  const done = await checker.status()
+  assert.equal(done.install.phase, 'failed')
+  assert.match(done.install.message, /network down/)
+  assert.equal(await readFile(join(home, 'package.json'), 'utf8'), manifest, 'the manifest is restored')
+})
+
+test('builds an install command only for sources that can move', () => {
+  const pinned = '0'.repeat(40)
+  assert.deepEqual(
+    installCommand({ kind: 'npm', spec: '^0.4.0' }, '/profile', '@xi4z/dsh-utils', '9.9.9'),
+    { dir: '/profile', spec: '@xi4z/dsh-utils@9.9.9', exact: true },
+  )
+  assert.deepEqual(
+    installCommand({ kind: 'git', spec: 'github:xi4z/dsh-utils#main', git: { owner: 'xi4z', repo: 'dsh-utils', ref: 'main' } }, '/profile', '@xi4z/dsh-utils', '9.9.9'),
+    { dir: '/profile', spec: 'github:xi4z/dsh-utils#main', exact: false },
+  )
+  assert.equal(
+    installCommand({ kind: 'git', spec: 'github:xi4z/dsh-utils#' + pinned, git: { owner: 'xi4z', repo: 'dsh-utils', ref: pinned } }, '/profile', '@xi4z/dsh-utils', '9.9.9'),
+    null,
+    'a commit-pinned spec cannot move',
+  )
+  assert.equal(installCommand({ kind: 'local', spec: 'link:/src' }, '/profile', '@xi4z/dsh-utils', '9.9.9'), null)
+})
+
+test('reads a GitHub repository and ref out of every git spec form', () => {
+  assert.deepEqual(parseGitSpec('github:xi4z/dsh-utils'), { owner: 'xi4z', repo: 'dsh-utils', ref: 'HEAD' })
+  assert.deepEqual(parseGitSpec('xi4z/dsh-utils#main'), { owner: 'xi4z', repo: 'dsh-utils', ref: 'main' })
+  assert.deepEqual(parseGitSpec('git+https://github.com/xi4z/dsh-utils.git#39f0c0f'), { owner: 'xi4z', repo: 'dsh-utils', ref: '39f0c0f' })
+  assert.deepEqual(parseGitSpec('git@github.com:xi4z/dsh-utils.git#Agent'), { owner: 'xi4z', repo: 'dsh-utils', ref: 'Agent' })
+  assert.deepEqual(parseGitSpec('https://github.com/xi4z/dsh-utils#v0.4.1&path:/'), { owner: 'xi4z', repo: 'dsh-utils', ref: 'v0.4.1' })
+  assert.equal(parseGitSpec('^0.4.0'), null)
+  assert.equal(parseGitSpec('@xi4z/dsh-utils'), null)
 })
 
 test('syncs a local Git repository into the preset skills directory twice', async (t) => {

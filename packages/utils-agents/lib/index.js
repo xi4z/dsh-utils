@@ -23,6 +23,7 @@ import { createLegacyBridge } from './legacy.js';
 import { sharedPresetView, syncSharedPresets } from './shared.js';
 import { pullSharedRepo, saveSharedRepoConfig, saveSharedRepoKey, sharedRepoView } from './global-repo.js';
 import { importNativePresets, nativePresetView, publishPresets } from './native.js';
+import { createUpdateChecker, startUpdateWatcher } from './update.js';
 export const name = 'utils-agents';
 /** Exact Connection routes owned by this component. */
 export const ROUTE_PATHS = {
@@ -39,6 +40,7 @@ export const ROUTE_PATHS = {
     sharedKey: '/api/dsh-utils/utils-agents/shared-key',
     sharedPull: '/api/dsh-utils/utils-agents/shared-pull',
     deployKey: '/api/dsh-utils/utils-agents/deploy-key',
+    update: '/api/dsh-utils/utils-agents/update',
     native: '/api/dsh-utils/utils-agents/native-presets',
     nativeImport: '/api/dsh-utils/utils-agents/native-presets-import',
     publish: '/api/dsh-utils/utils-agents/presets-publish',
@@ -66,6 +68,14 @@ export const Config = z.object({
         .description('新预设的默认技能仓库地址。').volatile(),
     defaultBranch: z.string().default('Agent')
         .description('新预设的默认技能仓库分支。').volatile(),
+    updateCheck: z.boolean().default(true)
+        .description('定时检查 npm 上 @xi4z/dsh-utils 的发布版本。').volatile(),
+    updateCheckIntervalHours: z.natural().min(1).max(168).default(6)
+        .description('两次自动版本检查之间的小时数。').volatile(),
+    updateRegistry: z.string().default('https://registry.npmjs.org')
+        .description('查询发布版本用的 npm registry 地址。').volatile(),
+    updateAutoInstall: z.boolean().default(true)
+        .description('查到新版本后在后台执行 pnpm add 自动安装（重启后生效；link/file 安装会跳过）。').volatile(),
 });
 /**
  * Activate the utils-agents routes.
@@ -74,6 +84,8 @@ export const Config = z.object({
  */
 export function apply(ctx, config = {}) {
     const legacy = createLegacyBridge(ctx, config);
+    const updates = createUpdateChecker(ctx, () => normalizeOptions(config));
+    startUpdateWatcher(ctx, updates, () => normalizeOptions(config));
     ctx.effect(() => () => { void legacy.dispose(); }, 'utils-agents: legacy preset bridge');
     // Register directory presets as soon as the registry exists, so the normal
     // preset picker sees them even before the Utils panel is opened.
@@ -99,6 +111,7 @@ export function apply(ctx, config = {}) {
         registerRoute(scope, ctx, connection, ROUTE_PATHS.sharedKey, ['POST'], (request) => handleSharedKey(ctx, config, request));
         registerRoute(scope, ctx, connection, ROUTE_PATHS.sharedPull, ['POST'], (request) => handleSharedPull(ctx, config, request));
         registerRoute(scope, ctx, connection, ROUTE_PATHS.deployKey, ['GET', 'POST'], (request) => handleDeployKey(ctx, request));
+        registerRoute(scope, ctx, connection, ROUTE_PATHS.update, ['GET', 'POST'], (request) => handleUpdate(ctx, config, updates, request));
         registerRoute(scope, ctx, connection, ROUTE_PATHS.native, ['GET'], (request) => handleNative(ctx, config, request));
         registerRoute(scope, ctx, connection, ROUTE_PATHS.nativeImport, ['POST'], (request) => handleNativeImport(ctx, config, legacy, request));
         registerRoute(scope, ctx, connection, ROUTE_PATHS.publish, ['POST'], (request) => handlePublish(ctx, config, request));
@@ -373,6 +386,18 @@ async function handleSharedPull(ctx, config, request) {
     }
     catch (error) {
         return failure(ctx, 'cannot pull shared repository', error);
+    }
+}
+/** GET/POST /update: the published bundle version and its last check. */
+async function handleUpdate(ctx, config, checker, request) {
+    try {
+        const options = normalizeOptions(config);
+        const schedule = { enabled: options.updateCheck, intervalHours: options.updateCheckIntervalHours, registry: options.updateRegistry };
+        const update = request.method === 'GET' ? await checker.status() : await checker.check();
+        return json({ update, schedule }, 200);
+    }
+    catch (error) {
+        return failure(ctx, 'cannot check the published version', error);
     }
 }
 /** GET/POST /deploy-key: the panel-wide Deploy Key for private repositories. */

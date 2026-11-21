@@ -36,6 +36,10 @@ export interface AgentsConfig {
     readonly nestedDepth?: MaybeRef<number>;
     readonly defaultRepoUrl?: MaybeRef<string>;
     readonly defaultBranch?: MaybeRef<string>;
+    readonly updateCheck?: MaybeRef<boolean>;
+    readonly updateCheckIntervalHours?: MaybeRef<number>;
+    readonly updateRegistry?: MaybeRef<string>;
+    readonly updateAutoInstall?: MaybeRef<boolean>;
 }
 /** Normalized settings with defaults applied. */
 export interface Options {
@@ -48,6 +52,10 @@ export interface Options {
     readonly nestedDepth: number;
     readonly defaultRepoUrl: string;
     readonly defaultBranch: string;
+    readonly updateCheck: boolean;
+    readonly updateCheckIntervalHours: number;
+    readonly updateRegistry: string;
+    readonly updateAutoInstall: boolean;
 }
 /** One command failure with the HTTP status it should answer with. */
 export declare class AgentsError extends Error {
@@ -119,6 +127,12 @@ export interface TargetStatus {
 }
 /** Normalize the volatile row settings once per request. */
 export declare function normalizeOptions(config: AgentsConfig | undefined): Options;
+/** npm registry asked for the published version of this bundle. */
+export declare const DEFAULT_UPDATE_REGISTRY = "https://registry.npmjs.org";
+/** Hours between two automatic published-version checks. */
+export declare const DEFAULT_UPDATE_INTERVAL_HOURS = 6;
+/** Upper bound for the automatic check interval. */
+export declare const MAX_UPDATE_INTERVAL_HOURS = 168;
 /**
  * Snapshot one live Config field.
  * @param value - plain value or volatile reference.

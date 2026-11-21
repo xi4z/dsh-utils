@@ -92,3 +92,10 @@
         # 新预设技能仓库的默认值。
         defaultRepoUrl: 'https://github.com/xi4z/skills'
         defaultBranch: 'Agent'
+        # 面板顶部的版本检查：定时查询 npm 上 @xi4z/dsh-utils 的 latest。
+        # 手动「检查更新」按钮不受间隔限制；改镜像时把 updateRegistry 换掉。
+        updateCheck: true
+        updateCheckIntervalHours: 6
+        updateRegistry: 'https://registry.npmjs.org'
+        # 查到新版本就后台 pnpm add；装完要重启 dsh web。link:/file: 安装自动跳过。
+        updateAutoInstall: true

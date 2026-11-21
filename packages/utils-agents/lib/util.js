@@ -47,7 +47,24 @@ export function normalizeOptions(config) {
         nestedDepth: clamp(refValue(config?.nestedDepth, 3), 1, 8),
         defaultRepoUrl: stringValue(refValue(config?.defaultRepoUrl, 'https://github.com/xi4z/skills'), 'https://github.com/xi4z/skills'),
         defaultBranch: stringValue(refValue(config?.defaultBranch, 'Agent'), 'Agent'),
+        updateCheck: refValue(config?.updateCheck, true) === true,
+        updateCheckIntervalHours: clamp(refValue(config?.updateCheckIntervalHours, DEFAULT_UPDATE_INTERVAL_HOURS), 1, MAX_UPDATE_INTERVAL_HOURS),
+        updateRegistry: registryValue(refValue(config?.updateRegistry, DEFAULT_UPDATE_REGISTRY)),
+        updateAutoInstall: refValue(config?.updateAutoInstall, true) === true,
     };
+}
+/** npm registry asked for the published version of this bundle. */
+export const DEFAULT_UPDATE_REGISTRY = 'https://registry.npmjs.org';
+/** Hours between two automatic published-version checks. */
+export const DEFAULT_UPDATE_INTERVAL_HOURS = 6;
+/** Upper bound for the automatic check interval. */
+export const MAX_UPDATE_INTERVAL_HOURS = 168;
+/** One registry base URL, ignoring trailing slashes; anything not http(s) falls back. */
+function registryValue(value) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (!/^https?:\/\/[^\s]+$/i.test(text))
+        return DEFAULT_UPDATE_REGISTRY;
+    return text.replace(/\/+$/, '');
 }
 /**
  * Snapshot one live Config field.

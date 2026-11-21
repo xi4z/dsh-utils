@@ -49,6 +49,10 @@ export interface AgentsConfig {
   readonly nestedDepth?: MaybeRef<number>
   readonly defaultRepoUrl?: MaybeRef<string>
   readonly defaultBranch?: MaybeRef<string>
+  readonly updateCheck?: MaybeRef<boolean>
+  readonly updateCheckIntervalHours?: MaybeRef<number>
+  readonly updateRegistry?: MaybeRef<string>
+  readonly updateAutoInstall?: MaybeRef<boolean>
 }
 
 /** Normalized settings with defaults applied. */
@@ -62,6 +66,10 @@ export interface Options {
   readonly nestedDepth: number
   readonly defaultRepoUrl: string
   readonly defaultBranch: string
+  readonly updateCheck: boolean
+  readonly updateCheckIntervalHours: number
+  readonly updateRegistry: string
+  readonly updateAutoInstall: boolean
 }
 
 /** One command failure with the HTTP status it should answer with. */
@@ -156,7 +164,27 @@ export function normalizeOptions(config: AgentsConfig | undefined): Options {
     nestedDepth: clamp(refValue(config?.nestedDepth, 3), 1, 8),
     defaultRepoUrl: stringValue(refValue(config?.defaultRepoUrl, 'https://github.com/xi4z/skills'), 'https://github.com/xi4z/skills'),
     defaultBranch: stringValue(refValue(config?.defaultBranch, 'Agent'), 'Agent'),
+    updateCheck: refValue(config?.updateCheck, true) === true,
+    updateCheckIntervalHours: clamp(refValue(config?.updateCheckIntervalHours, DEFAULT_UPDATE_INTERVAL_HOURS), 1, MAX_UPDATE_INTERVAL_HOURS),
+    updateRegistry: registryValue(refValue(config?.updateRegistry, DEFAULT_UPDATE_REGISTRY)),
+    updateAutoInstall: refValue(config?.updateAutoInstall, true) === true,
   }
+}
+
+/** npm registry asked for the published version of this bundle. */
+export const DEFAULT_UPDATE_REGISTRY = 'https://registry.npmjs.org'
+
+/** Hours between two automatic published-version checks. */
+export const DEFAULT_UPDATE_INTERVAL_HOURS = 6
+
+/** Upper bound for the automatic check interval. */
+export const MAX_UPDATE_INTERVAL_HOURS = 168
+
+/** One registry base URL, ignoring trailing slashes; anything not http(s) falls back. */
+function registryValue(value: unknown): string {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!/^https?:\/\/[^\s]+$/i.test(text)) return DEFAULT_UPDATE_REGISTRY
+  return text.replace(/\/+$/, '')
 }
 
 /**

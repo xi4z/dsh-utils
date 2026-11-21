@@ -34,6 +34,7 @@ export declare const ROUTE_PATHS: {
     readonly sharedKey: "/api/dsh-utils/utils-agents/shared-key";
     readonly sharedPull: "/api/dsh-utils/utils-agents/shared-pull";
     readonly deployKey: "/api/dsh-utils/utils-agents/deploy-key";
+    readonly update: "/api/dsh-utils/utils-agents/update";
     readonly native: "/api/dsh-utils/utils-agents/native-presets";
     readonly nativeImport: "/api/dsh-utils/utils-agents/native-presets-import";
     readonly publish: "/api/dsh-utils/utils-agents/presets-publish";
@@ -52,6 +53,10 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     nestedDepth: z<number, number, "volatile-defined">;
     defaultRepoUrl: z<string, string, "volatile-defined">;
     defaultBranch: z<string, string, "volatile-defined">;
+    updateCheck: z<boolean, boolean, "volatile-defined">;
+    updateCheckIntervalHours: z<number, number, "volatile-defined">;
+    updateRegistry: z<string, string, "volatile-defined">;
+    updateAutoInstall: z<boolean, boolean, "volatile-defined">;
 }>>, Schemastery.ObjectT<NoInfer<{
     maxBytes: z<number, number, "volatile-defined">;
     presetDirs: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
@@ -62,6 +67,10 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     nestedDepth: z<number, number, "volatile-defined">;
     defaultRepoUrl: z<string, string, "volatile-defined">;
     defaultBranch: z<string, string, "volatile-defined">;
+    updateCheck: z<boolean, boolean, "volatile-defined">;
+    updateCheckIntervalHours: z<number, number, "volatile-defined">;
+    updateRegistry: z<string, string, "volatile-defined">;
+    updateAutoInstall: z<boolean, boolean, "volatile-defined">;
 }>>, "plain">;
 /**
  * Activate the utils-agents routes.

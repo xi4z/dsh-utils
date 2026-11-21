@@ -101,6 +101,10 @@ window.__ModuleLoader__.load({
       { key: 'nestedDepth', label: '嵌套扫描深度', kind: 'number', min: 1, hint: '递归寻找嵌套文件的目录深度。' },
       { key: 'defaultRepoUrl', label: '默认技能仓库', kind: 'text', hint: '新预设的仓库地址默认值。' },
       { key: 'defaultBranch', label: '默认仓库分支', kind: 'text', hint: '新预设的仓库分支默认值。' },
+      { key: 'updateCheck', label: '定时检查发布版本', kind: 'boolean', hint: '按下面的间隔查询 npm registry 上 @xi4z/dsh-utils 的 latest，并在面板里提示。' },
+      { key: 'updateCheckIntervalHours', label: '版本检查间隔（小时）', kind: 'number', min: 1, max: 168, hint: '1–168 小时；面板的「检查更新」按钮不受它限制。' },
+      { key: 'updateRegistry', label: 'npm registry', kind: 'text', hint: '默认 https://registry.npmjs.org；可换成镜像，例如 https://registry.npmmirror.com。' },
+      { key: 'updateAutoInstall', label: '自动安装新版本', kind: 'boolean', hint: '查到新版本后在后台执行 pnpm add，装完需要重启 dsh web 才生效；link:/file: 安装会跳过。' },
     ]
     const STYLE = `
 .dsu-root { display: grid; gap: 18px; padding: 4px 0; color: var(--dsw-alias-label-primary); font-size: 13px; }
@@ -658,6 +662,7 @@ window.__ModuleLoader__.load({
       '.dswb-head { display: flex; align-items: center; gap: 8px; }',
       '.dswb-title { margin: 0; font-size: 14px; font-weight: 600; }',
       '.dswb-count { color: var(--dsw-alias-label-secondary); font-size: 11px; }',
+      '.dswb-update { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11px; }',
       '.dswb-refresh { margin-left: auto; padding: 4px 10px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; cursor: pointer; }',
       '.dswb-refresh:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }',
       '.dswb-refresh:disabled { opacity: 0.6; cursor: default; }',
@@ -819,6 +824,68 @@ window.__ModuleLoader__.load({
       if (key.source === 'stored') return '已保存的 Deploy Key'
       if (key.source === 'global') return '通用 Deploy Key'
       return '无'
+    }
+
+    /** Normalize the automatic-install state. */
+    function wbInstall(value) {
+      const install = value !== null && typeof value === 'object' ? value : {}
+      const phase = install.phase
+      return {
+        phase: phase === 'installing' || phase === 'installed' || phase === 'failed' ? phase : 'idle',
+        version: wbText(install.version) !== '' ? wbText(install.version) : null,
+        message: wbText(install.message) !== '' ? wbText(install.message) : null,
+      }
+    }
+
+    /** Normalize the published-version answer. */
+    function wbUpdate(value) {
+      const update = value !== null && typeof value === 'object' ? value : {}
+      return {
+        current: wbText(update.current),
+        latest: wbText(update.latest) !== '' ? wbText(update.latest) : null,
+        updateAvailable: update.updateAvailable === true,
+        source: wbText(update.source) || 'npm',
+        origin: wbText(update.origin),
+        install: wbInstall(update.install),
+        checkedAt: wbText(update.checkedAt) !== '' ? wbText(update.checkedAt) : null,
+        attemptedAt: wbText(update.attemptedAt) !== '' ? wbText(update.attemptedAt) : null,
+        error: wbText(update.error) !== '' ? wbText(update.error) : null,
+      }
+    }
+
+    /** How long ago one ISO timestamp was, in the panel's short wording. */
+    function wbAgo(iso) {
+      if (iso === null) return ''
+      const time = Date.parse(iso)
+      if (!Number.isFinite(time)) return ''
+      const minutes = Math.max(0, Math.round((Date.now() - time) / 60000))
+      if (minutes < 1) return '刚刚'
+      if (minutes < 60) return minutes + ' 分钟前'
+      const hours = Math.round(minutes / 60)
+      if (hours < 48) return hours + ' 小时前'
+      return new Date(time).toLocaleDateString()
+    }
+
+    /** The short label for where the newest version was read from. */
+    function wbSourceLabel(update) {
+      if (update === null) return ''
+      if (update.source === 'git') return 'GitHub'
+      if (update.source === 'local') return '本地'
+      return 'npm'
+    }
+
+    /** The sentence describing one published-version answer. */
+    function wbUpdateText(update) {
+      if (update === null) return '尚未检查'
+      if (update.install.phase === 'installing') return '正在自动更新到 ' + update.install.version + '…'
+      if (update.install.phase === 'installed') return '已自动更新到 ' + update.install.version + '（重启 dsh web 生效）'
+      if (update.install.phase === 'failed') return '自动更新失败：' + (update.install.message || '未知错误')
+      if (update.error !== null) {
+        return update.latest === null ? '检查失败：' + update.error : '检查失败（上次看到 ' + update.latest + '）：' + update.error
+      }
+      if (update.updateAvailable) return '可更新到 ' + update.latest
+      if (update.checkedAt !== null) return '已是最新（' + wbAgo(update.checkedAt) + '检查）'
+      return '尚未检查'
     }
 
     /** Editable repository draft. */
@@ -1062,6 +1129,8 @@ window.__ModuleLoader__.load({
       const [deployKey, setDeployKey] = React.useState(null)
       const [deployKeyState, setDeployKeyState] = React.useState('loading')
       const [deployKeyDraft, setDeployKeyDraft] = React.useState('')
+      const [update, setUpdate] = React.useState(null)
+      const [updateState, setUpdateState] = React.useState('loading')
       const [busy, setBusy] = React.useState('')
       const [error, setError] = React.useState('')
       const [notice, setNotice] = React.useState('')
@@ -1221,6 +1290,49 @@ window.__ModuleLoader__.load({
         })
         return function () { cancelled = true }
       }, [reloadKey])
+
+      React.useEffect(function () {
+        let cancelled = false
+        setUpdateState('loading')
+        wbRequest('update', {}).then(function (body) {
+          if (cancelled) return
+          setUpdate(wbUpdate(body.update))
+          setUpdateState('ready')
+        }).catch(function () {
+          if (cancelled) return
+          setUpdate(null)
+          setUpdateState('unsupported')
+        })
+        return function () { cancelled = true }
+      }, [reloadKey])
+
+      // While a background install runs, refresh the answer a few times so the
+      // panel can report "installed, restart to apply" without a manual reload.
+      React.useEffect(function () {
+        if (update === null || update.install.phase !== 'installing') return undefined
+        let cancelled = false
+        let timer = null
+        let attempts = 0
+        const poll = async function () {
+          if (cancelled || attempts >= 40) return
+          attempts += 1
+          try {
+            const body = await wbRequest('update', {})
+            if (cancelled) return
+            const next = wbUpdate(body.update)
+            setUpdate(next)
+            if (next.install.phase !== 'installing') return
+          } catch {
+            // Keep the current sentence; the next attempt may still answer.
+          }
+          if (!cancelled) timer = setTimeout(poll, 3000)
+        }
+        timer = setTimeout(poll, 3000)
+        return function () {
+          cancelled = true
+          if (timer !== null) clearTimeout(timer)
+        }
+      }, [update === null ? 'none' : update.install.phase])
 
       React.useEffect(function () {
         if (selectedFileId === '') {
@@ -1473,6 +1585,21 @@ window.__ModuleLoader__.load({
         }
       }
 
+      const checkUpdate = async function () {
+        if (busy !== '') return
+        setBusy('update')
+        setError('')
+        try {
+          const body = await wbRequest('update', { body: {} })
+          setUpdate(wbUpdate(body.update))
+          setUpdateState('ready')
+        } catch (failure) {
+          setError(messageOf(failure))
+        } finally {
+          setBusy('')
+        }
+      }
+
       const syncNow = async function () {
         if (preset === null || busy !== '') return
         setBusy('sync')
@@ -1648,6 +1775,25 @@ window.__ModuleLoader__.load({
           }, status === 'loading' ? '读取中…' : '刷新'),
         ]),
       ]
+
+      if (updateState !== 'unsupported') {
+        const updateLabel = updateState === 'loading' ? '读取中…' : wbUpdateText(update)
+        children.push(h('div', { className: 'dswb-update', key: 'update' }, [
+          update === null ? null : h('span', { className: 'dswb-badge', key: 'current' }, 'v' + update.current),
+          update === null ? null : h('span', { className: 'dswb-badge', key: 'source' }, wbSourceLabel(update)),
+          update !== null && update.updateAvailable
+            ? h('span', { className: 'dswb-badge dswb-badgeOn', key: 'latest' }, '有新版本 ' + update.latest)
+            : null,
+          h('button', {
+            className: 'dswb-linkBtn', key: 'check', type: 'button',
+            disabled: busy !== '' || updateState === 'loading' || (update !== null && update.install.phase === 'installing'), onClick: checkUpdate,
+          }, busy === 'update' ? '检查中…' : '检查更新'),
+          h('span', {
+            className: 'dswb-status', key: 'state',
+            title: update === null ? undefined : update.error !== null ? update.error : '来源：' + (update.origin || '未知'),
+          }, updateLabel),
+        ]))
+      }
 
       if (status === 'loading') {
         children.push(h('p', { className: 'dswb-note', key: 'loading' }, '正在读取预设…'))
