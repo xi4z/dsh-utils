@@ -82,10 +82,10 @@ profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 p
 
 ```sh
 git push                                    # 先推代码
-git tag v0.6.0 && git push origin v0.6.0    # 再推 tag，CI 里 build + 发布全部五个包
+git tag v0.7.0 && git push origin v0.7.0    # 再推 tag，CI 里 build + 发布全部五个包
 ```
 
-tag 必须等于根包 `package.json` 的版本，否则 job 直接失败（防止把 0.6.0 的代码发成 0.3.9）。CI 里 `pnpm release` 按依赖顺序发五个包，带 `--provenance`。
+tag 必须等于根包 `package.json` 的版本，否则 job 直接失败（防止把 0.7.0 的代码发成 0.3.9）。CI 里 `pnpm release` 按依赖顺序发五个包，带 `--provenance`。
 
 一次性准备：npm 建一个 Automation token，存成仓库 secret `NPM_TOKEN`。scope 是公开的 `@xi4z`，token 所属账号要能用这个 scope（scope 通常是 npm 用户名或已创建的组织）。
 
@@ -365,7 +365,7 @@ Deploy Key 按预设保存到 `$DSH_HOME/storages/dsh-utils-agents/<preset>.key`
 
 #### 版本检查
 
-面板顶部显示当前 bundle 版本（如 `v0.6.0`）、安装来源徽标（npm / GitHub / 本地）和「检查更新」按钮。宿主按 `updateCheckIntervalHours`（默认 6 小时）在后台检查，激活后约 15 秒先查一次；远端比当前版本新时，按钮旁出现「有新版本 x.y.z」。
+面板顶部显示当前 bundle 版本（如 `v0.7.0`）、安装来源徽标（npm / GitHub / 本地）和「检查更新」按钮。宿主按 `updateCheckIntervalHours`（默认 6 小时）在后台检查，激活后约 15 秒先查一次；远端比当前版本新时，按钮旁出现「有新版本 x.y.z」。
 
 查哪里取决于 profile 里 `@xi4z/dsh-utils` 的安装方式（读 profile 的 `package.json`）：
 
