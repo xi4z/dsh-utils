@@ -405,7 +405,7 @@ export function createUpdateChecker(ctx: Context, options: () => Options, runner
     // A restart applies an install the cache still marks as done for the old version,
     // and an "installing" entry left behind by a killed process is stale.
     const storedInstall = stored?.install ?? IDLE_INSTALL
-    const pending = storedInstall.phase === 'installed' && storedInstall.version === identity.version
+    const pending: UpdateInstall = storedInstall.phase === 'installed' && storedInstall.version === identity.version
       ? IDLE_INSTALL
       : storedInstall.phase === 'installing'
         ? { phase: 'failed', version: storedInstall.version, message: '上次自动更新被中断（进程退出）', at: storedInstall.at }
