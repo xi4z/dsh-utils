@@ -1,6 +1,6 @@
 {
   "name": "@xi4z/dsh-utils",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "DeepSeek Harness utility bundle: the root package carries the main component (recursive SKILL.md discovery, legacy Git skill-repository routes, and the browser UI) and mounts four components as its own subpaths (unattended approval gate, session notifications, skill panel, and utils-agents: the preset/skill panel that also pulls private repositories with a Deploy Key). It declares no @xi4z dependencies, so one spec installs everything from a registry name, a Git URL, a packed tarball or a local directory.",
   "keywords": [
     "dsh",

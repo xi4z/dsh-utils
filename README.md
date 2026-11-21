@@ -28,7 +28,7 @@ DSH 客户端扫描器从**包根挂载行**加载 `client.js`。根包自己声
 |---|---|
 | 最近一次发布 | `@xi4z/dsh-utils` |
 | `main` 最新提交 | `https://github.com/xi4z/dsh-utils` |
-| 离线单文件 | `/abs/path/xi4z-dsh-utils-0.4.1.tgz` |
+| 离线单文件 | `/abs/path/xi4z-dsh-utils-0.5.0.tgz` |
 | 改代码、即时生效 | `/abs/path/dsh-utils`（绝对目录，装成 `link:`） |
 
 ```
@@ -45,9 +45,9 @@ dsh plugin --profile <profile> add @xi4z/dsh-utils
 
 ```sh
 pnpm install && pnpm build
-pnpm pack --pack-destination dist      # → dist/xi4z-dsh-utils-0.4.1.tgz
+pnpm pack --pack-destination dist      # → dist/xi4z-dsh-utils-0.5.0.tgz
 # 复制到目标机器后：
-plugin_manager action=install_bundle target=/abs/path/xi4z-dsh-utils-0.4.1.tgz
+plugin_manager action=install_bundle target=/abs/path/xi4z-dsh-utils-0.5.0.tgz
 ```
 
 本地开发直接装目录（`link:`，不复制文件，改完 `pnpm build` 重启宿主）：
@@ -77,10 +77,10 @@ profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 p
 
 ```sh
 git push                                    # 先推代码
-git tag v0.4.1 && git push origin v0.4.1    # 再推 tag，CI 里 build + 发布
+git tag v0.5.0 && git push origin v0.5.0    # 再推 tag，CI 里 build + 发布
 ```
 
-tag 必须等于根包 `package.json` 的版本，否则 job 直接失败（防止把 0.4.1 的代码发成 0.3.9）。CI 里 `pnpm release` 只发根包（组件都在包里），带 `--provenance`。
+tag 必须等于根包 `package.json` 的版本，否则 job 直接失败（防止把 0.5.0 的代码发成 0.3.9）。CI 里 `pnpm release` 只发根包（组件都在包里），带 `--provenance`。
 
 一次性准备：npm 建一个 Automation token，存成仓库 secret `NPM_TOKEN`。scope 是公开的 `@xi4z`，token 所属账号要能用这个 scope（scope 通常是 npm 用户名或已创建的组织）。
 
@@ -377,7 +377,7 @@ Deploy Key 按预设保存到 `$DSH_HOME/storages/dsh-utils-agents/<preset>.key`
 
 #### 版本检查
 
-面板顶部显示当前 bundle 版本（如 `v0.4.1`）、安装来源徽标（npm / GitHub / 本地）和「检查更新」按钮。宿主按 `updateCheckIntervalHours`（默认 6 小时）在后台检查，激活后约 15 秒先查一次；远端比当前版本新时，按钮旁出现「有新版本 x.y.z」。
+面板顶部显示当前 bundle 版本（如 `v0.5.0`）、安装来源徽标（npm / GitHub / 本地）和「检查更新」按钮。宿主按 `updateCheckIntervalHours`（默认 6 小时）在后台检查，激活后约 15 秒先查一次；远端比当前版本新时，按钮旁出现「有新版本 x.y.z」。
 
 查哪里取决于 profile 里 `@xi4z/dsh-utils` 的安装方式（读 profile 的 `package.json`）：
 
