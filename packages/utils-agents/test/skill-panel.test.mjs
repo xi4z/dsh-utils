@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { isAbsolute } from 'node:path'
-import { apply, Config, inject, name, ROUTE_PATH } from '../lib/index.js'
+import { Config } from '../lib/index.js'
+import { applySkillPanel, ROUTE_PATH } from '../lib/skill-panel.js'
 
 // ---------------------------------------------------------------- helpers --
 
@@ -124,9 +125,8 @@ async function fetchPanel(route, query = '') {
 
 // ------------------------------------------------------------- module shape --
 
-test('the component exports the plugin identity the bundle patch mounts', () => {
-  assert.equal(name, 'skill-panel')
-  assert.deepEqual(inject, ['skills'])
+test('the visibility half keeps its route and is exported as a sub-apply', () => {
+  assert.equal(typeof applySkillPanel, 'function')
   assert.equal(typeof Config, 'function')
   assert.equal(ROUTE_PATH, '/api/dsh-utils/skill-panel/list')
 })
@@ -144,7 +144,7 @@ test('list and snapshot mark disabled skills model-uninvocable, leaving original
   const beta = skill('beta')
   const registry = new FakeRegistry([alpha, beta])
   const ctx = fakeCtx({ skills: registry })
-  apply(ctx, { disabledSkills: ['beta'] })
+  applySkillPanel(ctx, { disabledSkills: ['beta'] })
 
   const listed = await registry.list({ cwd: '/work' })
   assert.equal(listed.length, 2)
@@ -163,7 +163,7 @@ test('list and snapshot mark disabled skills model-uninvocable, leaving original
 test('an empty disabled list returns the registry arrays unchanged', async () => {
   const registry = new FakeRegistry([skill('alpha')])
   const ctx = fakeCtx({ skills: registry })
-  apply(ctx, { disabledSkills: [] })
+  applySkillPanel(ctx, { disabledSkills: [] })
 
   assert.equal(await registry.list({}), registry.catalogue)
   const snapshot = await registry.snapshot({})
@@ -173,7 +173,7 @@ test('an empty disabled list returns the registry arrays unchanged', async () =>
 test('get is not wrapped, so manual invocation still loads a disabled skill', async () => {
   const registry = new FakeRegistry([skill('alpha')])
   const ctx = fakeCtx({ skills: registry })
-  apply(ctx, { disabledSkills: ['alpha'] })
+  applySkillPanel(ctx, { disabledSkills: ['alpha'] })
 
   assert.equal(Object.hasOwn(registry, 'get'), false)
   const loaded = await registry.get('alpha')
@@ -189,7 +189,7 @@ test('the disabled set is re-read from the volatile reference on every call', as
   }
   const registry = new FakeRegistry([skill('alpha')])
   const ctx = fakeCtx({ skills: registry })
-  apply(ctx, { disabledSkills: live })
+  applySkillPanel(ctx, { disabledSkills: live })
 
   assert.equal((await registry.list({}))[0].invocation.modelInvocable, true)
   disabled = ['alpha']
@@ -202,7 +202,7 @@ test('non-string and blank entries are ignored, and names are trimmed and de-dup
   const registry = new FakeRegistry([skill('alpha')])
   const connection = fakeConnection()
   const ctx = fakeCtx({ skills: registry, connection })
-  apply(ctx, { disabledSkills: [' alpha ', 'alpha', '', '  ', 42, null] })
+  applySkillPanel(ctx, { disabledSkills: [' alpha ', 'alpha', '', '  ', 42, null] })
 
   assert.equal((await registry.list({}))[0].invocation.modelInvocable, false)
   const body = await (await fetchPanel(routeOf(connection))).json()
@@ -214,7 +214,7 @@ test('non-string and blank entries are ignored, and names are trimmed and de-dup
 test('dispose restores inherited methods and inherited shadowing', async () => {
   const registry = new FakeRegistry([skill('alpha')])
   const ctx = fakeCtx({ skills: registry })
-  apply(ctx, { disabledSkills: ['alpha'] })
+  applySkillPanel(ctx, { disabledSkills: ['alpha'] })
 
   assert.equal(Object.hasOwn(registry, 'list'), true)
   assert.equal(Object.hasOwn(registry, 'snapshot'), true)
@@ -232,7 +232,7 @@ test('dispose restores own methods with their original descriptor', async () => 
   const ownSnapshot = async () => ({ skills: [skill('alpha')], complete: false })
   const registry = { list: ownList, snapshot: ownSnapshot }
   const ctx = fakeCtx({ skills: registry })
-  apply(ctx, { disabledSkills: ['alpha'] })
+  applySkillPanel(ctx, { disabledSkills: ['alpha'] })
 
   assert.notEqual(registry.list, ownList)
   assert.notEqual(registry.snapshot, ownSnapshot)
@@ -257,7 +257,7 @@ test('the list route serves a sorted payload with unwrapped model flags', async 
     connection,
     services: { workingDirectory: { defaultDirectory: '/default/work' } },
   })
-  apply(ctx, { disabledSkills: [' beta ', 'beta', 'alpha'] })
+  applySkillPanel(ctx, { disabledSkills: [' beta ', 'beta', 'alpha'] })
 
   const route = routeOf(connection)
   assert.equal(route.path, '/api/dsh-utils/skill-panel/list')
@@ -327,7 +327,7 @@ test('the list route uses the live agent cwd, scope, and preset skill layer', as
     connection,
     services: { agents, workingDirectory, agentPresets },
   })
-  apply(ctx, {})
+  applySkillPanel(ctx, {})
 
   const body = await (await fetchPanel(routeOf(connection), '?sessionId=session-1')).json()
   assert.equal(body.sessionId, 'session-1')
@@ -368,7 +368,7 @@ test('a scoped proxy for the same registry still lists through the unwrapped hos
       agentPresets: { serviceFor: () => scopedProxy },
     },
   })
-  apply(ctx, { disabledSkills: ['beta'] })
+  applySkillPanel(ctx, { disabledSkills: ['beta'] })
 
   const body = await (await fetchPanel(routeOf(connection), '?sessionId=session-1')).json()
   const byName = Object.fromEntries(body.skills.map((entry) => [entry.name, entry]))
@@ -388,7 +388,7 @@ test('an unknown session falls back to the default cwd and host registry', async
     connection,
     services: { agents, workingDirectory: { defaultDirectory: '/default/work' } },
   })
-  apply(ctx, {})
+  applySkillPanel(ctx, {})
 
   const body = await (await fetchPanel(routeOf(connection), '?sessionId=missing')).json()
   assert.equal(body.sessionId, 'missing')
@@ -404,7 +404,7 @@ test('a discovery failure becomes a 500 JSON response and a warning', async () =
   }
   const connection = fakeConnection()
   const ctx = fakeCtx({ skills: registry, connection })
-  apply(ctx, {})
+  applySkillPanel(ctx, {})
 
   const response = await fetchPanel(routeOf(connection))
   assert.equal(response.status, 500)
@@ -417,7 +417,7 @@ test('a discovery failure becomes a 500 JSON response and a warning', async () =
 test('without Connection the panel silently skips the route', () => {
   const registry = new FakeRegistry([skill('alpha')])
   const ctx = fakeCtx({ skills: registry })
-  apply(ctx, { disabledSkills: ['alpha'] })
+  applySkillPanel(ctx, { disabledSkills: ['alpha'] })
 
   assert.deepEqual(ctx.injects, [['connection']])
   assert.equal(ctx.warnings.length, 0)
@@ -434,7 +434,7 @@ test('a route registration failure is logged, not swallowed or thrown', () => {
     },
   }
   const ctx = fakeCtx({ skills: registry, connection })
-  apply(ctx, {})
+  applySkillPanel(ctx, {})
 
   assert.ok(ctx.warnings.some((warning) => warning.includes('cannot register')))
   assert.ok(ctx.warnings.some((warning) => warning.includes('route already registered')))
@@ -444,10 +444,10 @@ test('the route effect is labelled with its path and removed on dispose', async 
   const registry = new FakeRegistry([skill('alpha')])
   const connection = fakeConnection()
   const ctx = fakeCtx({ skills: registry, connection })
-  apply(ctx, {})
+  applySkillPanel(ctx, {})
 
   const route = routeOf(connection)
-  assert.ok(ctx.effects.some((entry) => entry.label === `skill-panel: ${ROUTE_PATH}`))
+  assert.ok(ctx.effects.some((entry) => entry.label === `utils-agents skill-panel: ${ROUTE_PATH}`))
   await dispose(ctx)
   assert.equal(route.removed, true)
 })
@@ -479,7 +479,7 @@ test('real Cordis SkillRegistry: snapshot/list hide disabled skills and get stil
     },
   }))
 
-  apply(ctx, { disabledSkills: ['beta'] })
+  applySkillPanel(ctx, { disabledSkills: ['beta'] })
 
   // The traceable proxy is exactly where a bound instance method would have
   // resolved the pinned `snapshot` dynamically; this exercises that real path.

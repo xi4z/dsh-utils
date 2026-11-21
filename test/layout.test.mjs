@@ -1,17 +1,21 @@
 /**
  * Workspace layout guard.
  *
- * The repository ships ONE installable package: the root package owns the patch
- * layer, locale, assets, the browser bundle and the `utils-main` component, and
- * mounts the other four components as **subpath rows** of itself
- * (`@xi4z/dsh-utils/utils-agents`). A subpath row is not a package — DSH never
- * reads its `package.json` and takes its display title from the exported
- * `./<subpath>/locale/*.json` — so the root manifest must export both the row
- * entry and its locale, and must carry no `@xi4z/*` dependencies: that is what
- * lets one Git URL, tarball or directory install the whole bundle.
+ * The repository ships a patch-only bundle plus four independently published
+ * component packages — the same shape as the shipped experimental bundles:
+ *
+ * - `@xi4z/dsh-utils` owns only the patch layer, locale and icon. It mounts no
+ *   component of its own (`dsh.client` is absent, `src/index.ts` exports
+ *   nothing) and declares every component as an exact-version dependency.
+ * - Every component is a real package with its own manifest, built entry and
+ *   `locale/*.json` row title. The shared browser half lives in its own
+ *   `@xi4z/dsh-utils-ui` package.
+ * - `cordis.patch.yml` mounts all six by bare package name, so the plugin page
+ *   keeps addressing each row's configuration as `@xi4z/dsh-utils#<row id>`.
+ * - One release train: every package shares the bundle version.
  *
  * This test pins that shape so a moved folder, a forgotten export, a stale row
- * name or a reappearing component dependency fails before a host boots.
+ * name or a version drift fails before a host boots.
  */
 
 import test from 'node:test'
@@ -22,7 +26,14 @@ import { join } from 'node:path'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const BUNDLE = '@xi4z/dsh-utils'
-const COMPONENTS = ['approval-policy', 'utils-agents', 'notify', 'skill-panel']
+
+/** Directory, package name and Loader row id of every component. */
+const COMPONENTS = [
+  { dir: 'approval-policy', name: `${BUNDLE}-approval-policy`, row: 'dsh-approval-policy', client: false },
+  { dir: 'notify', name: `${BUNDLE}-notify`, row: 'dsh-notify', client: false },
+  { dir: 'utils-agents', name: `${BUNDLE}-utils-agents`, row: 'utils-agents', client: false },
+  { dir: 'ui', name: `${BUNDLE}-ui`, row: 'utils-ui', client: true },
+]
 
 async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'))
@@ -34,91 +45,92 @@ function matches(pattern, path) {
   return new RegExp(`^${source}(?:/|$)`).test(path)
 }
 
-test('the bundle package carries the patch layer, the utils-main entry and the browser bundle', async () => {
+test('the bundle package is patch-only: no component, no browser half', async () => {
   const manifest = await readJson(join(ROOT, 'package.json'))
   assert.equal(manifest.name, BUNDLE)
   assert.equal(manifest.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(manifest.dsh?.client?.platform, 'web')
+  assert.equal(manifest.dsh?.client, undefined, 'the bundle must not declare a browser half')
   assert.equal(manifest.exports['.'].default, './lib/index.js')
-  assert.equal(manifest.exports['./ui-host'].default, './lib/ui-host.js')
-  assert.equal(manifest.exports['./client'], './client.js')
+  assert.equal(manifest.exports['./client'], undefined, 'the bundle must not export a client bundle')
+  assert.equal(manifest.exports['./ui-host'], undefined, 'the bundle must not export a component entry')
   await access(join(ROOT, 'lib/index.js'))
-  await access(join(ROOT, 'lib/ui-host.js'))
   await access(join(ROOT, 'src/index.ts'))
-  await access(join(ROOT, 'src/ui-host.ts'))
-  await access(join(ROOT, 'client.js'))
   await access(join(ROOT, 'cordis.patch.yml'))
+  await access(join(ROOT, 'icon.svg'))
   for (const language of ['en', 'zh']) {
     const locale = await readJson(join(ROOT, 'locale', `${language}.json`))
     assert.equal(typeof locale.meta?.title, 'string')
   }
 })
 
-test('the bundle declares no component dependencies, so one spec installs everything', async () => {
-  const manifest = await readJson(join(ROOT, 'package.json'))
-  const names = Object.keys(manifest.dependencies ?? {})
-  assert.deepEqual(names.filter((name) => name.startsWith('@xi4z/')), [])
-  assert.deepEqual(names.filter((name) => name.startsWith('@xi4z/dsh-utils')), [])
+test('the bundle entry module exports nothing', async () => {
+  const source = await readFile(join(ROOT, 'src/index.ts'), 'utf8')
+  assert.match(source, /export\s*\{\s*\}/)
+  assert.doesNotMatch(source, /export\s+(function|const|class)\s+apply/)
 })
 
-test('every component is a subpath row exported from the bundle package', async () => {
+test('the bundle declares every component as an exact same-version dependency', async () => {
   const manifest = await readJson(join(ROOT, 'package.json'))
-  for (const name of COMPONENTS) {
-    const subpath = `./${name}`
-    const entry = manifest.exports[subpath]
-    assert.equal(entry?.default, `./packages/${name}/lib/index.js`, `${subpath} must export the built component`)
-    assert.equal(
-      manifest.exports[`${subpath}/locale/*.json`],
-      `./packages/${name}/locale/*.json`,
-      `${subpath} must export its locale for the row title`,
-    )
-    await access(join(ROOT, 'packages', name, 'lib/index.js'))
-    await access(join(ROOT, 'packages', name, 'lib/index.d.ts'))
+  const expected = Object.fromEntries(COMPONENTS.map(({ name }) => [name, manifest.version]))
+  const declared = Object.fromEntries(
+    Object.entries(manifest.dependencies ?? {}).filter(([name]) => name.startsWith(BUNDLE)),
+  )
+  assert.deepEqual(declared, expected)
+})
+
+test('every component is a published package with an entry and a row title', async () => {
+  for (const { dir, name, client } of COMPONENTS) {
+    const base = join(ROOT, 'packages', dir)
+    const manifest = await readJson(join(base, 'package.json'))
+    assert.equal(manifest.name, name)
+    assert.equal(manifest.version, (await readJson(join(ROOT, 'package.json'))).version)
+    assert.equal(manifest.exports['.'].default, './lib/index.js')
+    assert.equal(manifest.publishConfig?.access, 'public', `${name} must be publishable on its own`)
+    assert.equal(manifest.dsh?.bundle, undefined, `${name} is a component, not a bundle`)
+    assert.equal(manifest.dsh?.client === undefined, !client, `${name} client declaration`)
+    await access(join(base, 'lib/index.js'))
+    await access(join(base, 'lib/index.d.ts'))
+    await access(join(base, 'src/index.ts'))
     for (const language of ['en', 'zh']) {
-      const locale = await readJson(join(ROOT, 'packages', name, 'locale', `${language}.json`))
-      assert.equal(typeof locale.meta?.title, 'string', `${name}/${language}.json needs meta.title`)
+      const locale = await readJson(join(base, 'locale', `${language}.json`))
+      assert.equal(typeof locale.meta?.title, 'string', `${dir}/${language}.json needs meta.title`)
+    }
+    if (client) {
+      assert.equal(manifest.exports['./client'], './client.js')
+      await access(join(base, 'client.js'))
+    } else {
+      assert.equal(manifest.exports['./client'], undefined)
     }
   }
 })
 
-test('every file a subpath row needs is packed', async () => {
-  const manifest = await readJson(join(ROOT, 'package.json'))
-  const files = manifest.files ?? []
-  for (const name of COMPONENTS) {
-    for (const path of [`packages/${name}/lib/index.js`, `packages/${name}/locale/en.json`]) {
+test('every file a package needs is packed', async () => {
+  const bundle = await readJson(join(ROOT, 'package.json'))
+  for (const path of ['lib/index.js', 'cordis.patch.yml', 'locale/en.json', 'icon.svg']) {
+    assert.ok(bundle.files.some((pattern) => matches(pattern, path)), `bundle files must cover ${path}`)
+  }
+  for (const { dir } of COMPONENTS) {
+    const manifest = await readJson(join(ROOT, 'packages', dir, 'package.json'))
+    for (const path of ['lib/index.js', 'lib/index.d.ts', 'locale/en.json', 'src/index.ts']) {
       assert.ok(
-        files.some((pattern) => matches(pattern, path)),
-        `${path} must be covered by files: ${JSON.stringify(files)}`,
+        manifest.files.some((pattern) => matches(pattern, path)),
+        `${dir}: files must cover ${path}: ${JSON.stringify(manifest.files)}`,
       )
     }
+    if (manifest.dsh?.client) {
+      assert.ok(manifest.files.some((pattern) => matches(pattern, 'client.js')), `${dir}: client.js must be packed`)
+    }
   }
 })
 
-test('every patch row names this package, directly or as a subpath', async () => {
-  const manifest = await readJson(join(ROOT, 'package.json'))
+test('every patch row mounts one component package by bare name', async () => {
   const patch = await readFile(join(ROOT, 'cordis.patch.yml'), 'utf8')
-  const rows = [...patch.matchAll(/- id: (\S+)\n\s+name: (['"]?)([^'"\n]+)\2/g)].map((match) => ({ id: match[1], name: match[3] }))
+  const rows = [...patch.matchAll(/- id: (\S+)\n\s+name: (['"]?)([^'"\n]+)\2/g)].map((match) => ({
+    id: match[1],
+    name: match[3],
+  }))
   assert.deepEqual(
     rows.sort((a, b) => a.id.localeCompare(b.id)),
-    [
-      { id: 'dsh-approval-policy', name: `${manifest.name}/approval-policy` },
-      { id: 'dsh-notify', name: `${manifest.name}/notify` },
-      { id: 'dsh-skill-panel', name: `${manifest.name}/skill-panel` },
-      { id: 'utils-agents', name: `${manifest.name}/utils-agents` },
-      { id: 'utils-main', name: manifest.name },
-    ],
+    COMPONENTS.map(({ name, row }) => ({ id: row, name })).sort((a, b) => a.id.localeCompare(b.id)),
   )
-})
-
-test('component directories stay build units and never declare the browser half', async () => {
-  const root = await readJson(join(ROOT, 'package.json'))
-  assert.equal(root.dsh?.client?.platform, 'web')
-  for (const name of COMPONENTS) {
-    const manifest = await readJson(join(ROOT, 'packages', name, 'package.json'))
-    assert.equal(manifest.name, `${BUNDLE}-${name}`)
-    assert.equal(manifest.exports['.'].default, './lib/index.js')
-    assert.equal(manifest.dsh?.client, undefined, `${manifest.name} must not declare a client bundle`)
-    assert.equal(manifest.publishConfig, undefined, `${manifest.name} is not published on its own`)
-    await access(join(ROOT, 'packages', name, 'src/index.ts'))
-  }
 })

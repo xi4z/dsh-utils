@@ -1,6 +1,6 @@
 {
   "name": "@xi4z/dsh-utils-notify",
-  "version": "0.3.0",
+  "version": "0.6.0",
   "description": "dsh-utils component: turn-end / approval / question notifications through a Gotify gateway, tagged with the device name.",
   "license": "MIT",
   "author": "xi4z",
@@ -47,5 +47,8 @@
     "@deepseek-ai/dsh-agent": "0.2.2-rc.2",
     "@types/node": "^24.0.0",
     "typescript": "~5.9.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

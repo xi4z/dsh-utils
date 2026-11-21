@@ -1,35 +1,36 @@
 # @xi4z/dsh-utils
 
-单包形态：`@xi4z/dsh-utils` 一个包既是 bundle 层（`cordis.patch.yml` + locale + icon），也是主组件 `utils-main` 与整个浏览器半侧的代码所在，其余四个组件以**包内 subpath** 挂载（`@xi4z/dsh-utils/utils-agents`）。因此 manifest 里没有任何 `@xi4z/*` 依赖，npm 名、GitHub 地址、packed tarball、本地目录四种装法都只需要这一个 spec。行 id 就是 settings 命名空间，保持稳定。
+官方实验性 bundle 形态：根包 `@xi4z/dsh-utils` 只做拼装（`cordis.patch.yml` + locale + icon），**本身不挂任何组件**；四个组件各自是独立发布的包，根包用同版本精确依赖把它们装起来。浏览器半侧单独成包 `@xi4z/dsh-utils-ui`（宿主 `apply()` 为空），客户端扫描器据此从 `utils-ui` 这个包根行加载 `client.js`。行 id 就是 settings 命名空间，保持稳定。
 
 | 组件 | 挂载项 id | 包 | 作用 |
 |---|---|---|---|
-| 递归技能发现 + 旧技能仓库路由（主组件） | `utils-main` | `@xi4z/dsh-utils`（包根） | 嵌套目录找 `SKILL.md`；保留旧的全局技能仓库 JSON 路由；`client.js` 提供全部配置页与右侧栏 utils-agents 面板 |
-| 无人值守审批门控 | `dsh-approval-policy` | `@xi4z/dsh-utils/approval-policy` | 给审批请求设应答窗口，超时 fail-closed |
-| 会话通知 | `dsh-notify` | `@xi4z/dsh-utils/notify` | 会话结束/等授权/等回答时，经 Gotify 网关推送，带设备名 |
-| 技能面板（宿主侧） | `dsh-skill-panel` | `@xi4z/dsh-utils/skill-panel` | 旧侧边栏卡片已并入 utils-agents；保留当前会话的模型可见性开关与配置页 |
-| utils-agents | `utils-agents` | `@xi4z/dsh-utils/utils-agents` | 一个侧边栏面板按预设管理 skills、技能仓库与 AGENTS.md，用通用 Deploy Key 拉取私有仓库，并从技能仓库 `.dsh` 同步共享预设 |
+| utils-agents（宿主侧） | `utils-agents` | `@xi4z/dsh-utils-utils-agents` | 技能与预设的唯一宿主：嵌套 `SKILL.md` 发现、模型可见性开关，以及按预设管理 skills、技能仓库与 AGENTS.md |
+| 无人值守审批门控 | `dsh-approval-policy` | `@xi4z/dsh-utils-approval-policy` | 给审批请求设应答窗口，超时 fail-closed |
+| 会话通知 | `dsh-notify` | `@xi4z/dsh-utils-notify` | 会话结束/等授权/等回答时，经 Gotify 网关推送，带设备名 |
+| 共享浏览器界面 | `utils-ui` | `@xi4z/dsh-utils-ui` | 上面三行的配置页 + 右侧栏 utils-agents 面板；宿主侧只有空的 `apply()` |
 
-根包的 `locale/{en,zh}.json` 同时是 bundle 展示名与 `utils-main` 行的标题（「Harness 工具集」）；四个 subpath 行各自从 `./<subpath>/locale/*.json` 取行标题（无人值守审批门控 / 会话通知 / 技能面板 / utils-agents）。subpath 行不是包，DSH 不读它的 `package.json`，所以组件目录里那份 manifest 只是 tsc/测试的构建单元，不再发布。
+`utils-agents` 合并了原来的 `utils-main`（递归发现、旧全局仓库路由）与 `dsh-skill-panel`（技能可见性）：递归发现、可见性开关、预设/仓库/AGENTS.md 管理现在是**一个组件、一个配置命名空间**。旧的 `/api/dsh-utils-ui/*` 路由随 `utils-main` 一起删掉；仓库配置与 Deploy Key 仍沿用 `$DSH_HOME/storages/dsh-utils-ui.*` 文件，由 utils-agents 读写，升级后不用重填。
+
+根包 `locale/{en,zh}.json` 是 bundle 展示名；每个组件包用自己的 `locale/*.json` 提供行标题（utils-agents / 无人值守审批门控 / 会话通知 / 工具集界面）。`packages/*` 现在是**独立发布**的包，不再只是 tsc/测试的构建单元。
 
 ### 关于配置界面
 
-DSH 客户端扫描器从**包根挂载行**加载 `client.js`。根包自己声明 `dsh.client` 并导出 `./client`，而 `utils-main` 行挂的正是包根，所以这一行同时提供宿主行为（递归发现 + 技能仓库路由）和浏览器半侧；四个 subpath 行只做宿主行为，不会被当成 client source，因此不会出现 `multiple active Loader sources`。
+DSH 只把一个包的浏览器半侧挂在「Loader 说明符恰为裸包名」的行上。`@xi4z/dsh-utils-ui` 自己声明 `dsh.client` 并导出 `./client`，patch 用 `utils-ui` 行挂它的裸包名，所以 `client.js` 落在这一行；三个宿主行不声明 `dsh.client`，不会出现 `multiple active Loader sources`。
 
-「技能仓库」的旧全局路由仍在根包里（`src/ui-host.ts`，编译到 `lib/ui-host.js`），由 `utils-main` 行注册；但它不再有独立侧边栏卡片，新的按预设仓库同步在 `utils-agents`。`client.js` 现在只注册配置页和一个 utils-agents 侧边栏面板。停用 `utils-main` 会失去递归发现、旧仓库路由和整个配置界面；停用 `utils-agents` 只会失去 utils-agents 路由（面板显示 404 提示）。
+UI 与宿主彻底解耦：停用 `utils-ui` 只失去配置页与侧边栏面板，宿主行照常工作；停用某个宿主行只让它自己的配置页消失（`whileServed` 按行 id 判定）。`utils-agents` 的配置页现在一页三块：递归技能发现、模型可见性开关、预设与技能仓库。
 
-配置写 `cordis.patch.yml`：bundle 给默认值，profile 按 id 覆盖。覆盖行**不要写 `name`**（写旧包名会被 DSH 按 name mismatch 跳过）。技能仓库的仓库地址、分支与密钥不写 profile，存在 `$DSH_HOME/storages/dsh-utils-ui.json`（沿用旧文件名）。
+配置写 `cordis.patch.yml`：bundle 给默认值，profile 按 id 覆盖。覆盖行**不要写 `name`**。旧版的 `- id: utils-main` / `- id: dsh-skill-panel` 覆盖行不再生效，字段要搬进 `- id: utils-agents` 的 `config:`。
 
 ## 安装
 
-一个包，四种 spec，装法都一样：
+一次装 bundle；四个组件由 pnpm 作为根包的精确版本依赖从 registry 装上。
 
 | 想要的 | `target` |
 |---|---|
 | 最近一次发布 | `@xi4z/dsh-utils` |
-| `main` 最新提交 | `https://github.com/xi4z/dsh-utils` |
-| 离线单文件 | `/abs/path/xi4z-dsh-utils-0.5.0.tgz` |
-| 改代码、即时生效 | `/abs/path/dsh-utils`（绝对目录，装成 `link:`） |
+| `main` 最新提交 | `https://github.com/xi4z/dsh-utils`（组件包仍需 registry 上有同版本） |
+| 离线 | 五个 tarball（见下） |
+| 改代码、即时生效 | 目录 `link:`，profile 里同时 link 四个组件 |
 
 ```
 plugin_manager action=install_bundle target=@xi4z/dsh-utils
@@ -39,48 +40,52 @@ plugin_manager action=install_bundle target=@xi4z/dsh-utils
 dsh plugin --profile <profile> add @xi4z/dsh-utils
 ```
 
-四种都不要求 registry 上有任何 `@xi4z/*` 包：四个组件是包内 subpath 行（`@xi4z/dsh-utils/utils-agents`），根包只依赖公共的 `@deepseek-ai/schemastery`。GitHub 地址装的是 `main` 当前状态、不钉版本；要钉就用 npm 名或 `#<commit>`。
+发布版只需要这一个 spec：根包的 `dependencies` 固定到四个 `@xi4z/dsh-utils-*`，版本与 bundle 相同。GitHub 地址装的是 `main` 当前状态、不钉版本；要钉就用 npm 名或 `#<commit>`（组件仍从 registry 取同版本）。
 
-离线单文件由 `pnpm pack` 产出，本身就是自包含的：
+根包 tarball 不再自包含（组件是独立包）。要离线搬运，就把五个包都 pack：
 
 ```sh
 pnpm install && pnpm build
-pnpm pack --pack-destination dist      # → dist/xi4z-dsh-utils-0.5.0.tgz
-# 复制到目标机器后：
-plugin_manager action=install_bundle target=/abs/path/xi4z-dsh-utils-0.5.0.tgz
+pnpm -r --filter "./packages/*" pack --pack-destination dist
+pnpm pack --pack-destination dist
+# 目标机器 profile 里五个 tarball 都加 file: 依赖，再装 bundle
 ```
 
-本地开发直接装目录（`link:`，不复制文件，改完 `pnpm build` 重启宿主）：
+本地开发直接装目录（`link:`，不复制文件，改完 `pnpm build` 重启宿主）。因为组件是精确版本依赖，profile 要把四个组件也 link 进来，pnpm 才会用本地目录而不是去 registry 解析：
 
-```sh
-cd /path/to/dsh-utils
-pnpm install && pnpm build
-plugin_manager action=install_bundle target=/abs/path/to/dsh-utils
+```json
+{
+  "dependencies": {
+    "@xi4z/dsh-utils": "link:/abs/path/dsh-utils",
+    "@xi4z/dsh-utils-approval-policy": "link:/abs/path/dsh-utils/packages/approval-policy",
+    "@xi4z/dsh-utils-notify": "link:/abs/path/dsh-utils/packages/notify",
+    "@xi4z/dsh-utils-utils-agents": "link:/abs/path/dsh-utils/packages/utils-agents",
+    "@xi4z/dsh-utils-ui": "link:/abs/path/dsh-utils/packages/ui"
+  }
+}
 ```
 
-> 别给根包加回 `@xi4z/*` 依赖，也别把版本写成 `workspace:^`：那会毁掉"一条 spec 装全套"——`workspace:` 只在仓库内 `pnpm publish`/`pnpm pack` 时被改写成版本号，profile 从 git 或 tarball 装时 pnpm 拿到的是字面量，直接报 `ERR_PNPM_WORKSPACE_PKG_NOT_FOUND`。
+profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 patch 自动插四行，不手写挂载块；`config:` 只管配置。挂载项新增/改名要重启宿主。
 
-profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 patch 自动插五行，不手写挂载块；`config:` 只管配置。挂载项新增/改名要重启宿主。
+从 0.5.0 单包版升级：
 
-从单包/无 scope 版本升级：
-
-1. profile 依赖只留 `@xi4z/dsh-utils`，把 `dsh-utils`、`dsh-utils-*`、`@xi4z/dsh-utils-approval-policy` 这类的 link 全删掉（组件已并入根包，多留会变成不识别的孤儿依赖）；
-2. `dsh.profile.bundles` 里的旧名换成 `@xi4z/dsh-utils`；
-3. profile `cordis.patch.yml` 的组件覆盖行不要写 `name:`（只留 `id` + `config`）；旧的 `id: dsh-utils-ui` 覆盖行删掉（该行已并入 `utils-main`）；
+1. 发布版：profile 依赖只留 `@xi4z/dsh-utils`（pnpm 会装上四个组件）；本地开发：再按上表 link 四个 `packages/*`；
+2. `dsh.profile.bundles` 里的 `@xi4z/dsh-utils` 不变；
+3. profile `cordis.patch.yml` 的组件覆盖行只留 `id` + `config`；把 `id: utils-main` 与 `id: dsh-skill-panel` 下的字段搬进 `id: utils-agents`（旧 id 不再挂载），旧的 `id: dsh-utils-ui` 覆盖行删掉（新的 UI 行 id 是 `utils-ui`）；
 4. 重启宿主。技能仓库设置、Deploy Key、上次同步记录都不用重填。
 
 ## 发布
 
-只有一个包要发。`scripts/release.mjs` 先 `npm view` 探一遍，**版本已在 registry 上就跳过**，所以重复跑安全、失败后重跑能从断点续上。
+五个包同版本、按依赖顺序发布：四个组件在前，bundle 在后。`scripts/release.mjs` 先 `npm view` 探一遍，**版本已在 registry 上就跳过**，所以重复跑安全、失败后重跑能从断点续上；任一包版本与根包不一致会直接报错退出。
 
 推 GitHub 与发 npm 可以合成一次操作——打 tag 触发 [`publish.yml`](.github/workflows/publish.yml)：
 
 ```sh
 git push                                    # 先推代码
-git tag v0.5.0 && git push origin v0.5.0    # 再推 tag，CI 里 build + 发布
+git tag v0.6.0 && git push origin v0.6.0    # 再推 tag，CI 里 build + 发布全部五个包
 ```
 
-tag 必须等于根包 `package.json` 的版本，否则 job 直接失败（防止把 0.5.0 的代码发成 0.3.9）。CI 里 `pnpm release` 只发根包（组件都在包里），带 `--provenance`。
+tag 必须等于根包 `package.json` 的版本，否则 job 直接失败（防止把 0.6.0 的代码发成 0.3.9）。CI 里 `pnpm release` 按依赖顺序发五个包，带 `--provenance`。
 
 一次性准备：npm 建一个 Automation token，存成仓库 secret `NPM_TOKEN`。scope 是公开的 `@xi4z`，token 所属账号要能用这个 scope（scope 通常是 npm 用户名或已创建的组织）。
 
@@ -88,13 +93,13 @@ tag 必须等于根包 `package.json` 的版本，否则 job 直接失败（防�
 
 ```sh
 pnpm build
-pnpm release             # 发根包；版本已在 registry 上就跳过
+pnpm release             # 按顺序发组件与 bundle；已发布版本跳过
 pnpm release --dry-run   # 只看会不会发，不动 registry
 ```
 
-组件改了不用单独发布：它们随根包一起走，`packages/<名>/lib` 和 `locale` 都进 `files`，`pnpm pack` 后即自包含。只发一个包也意味着版本只有一个——改了任何组件都要提根包版本号。
+版本只有一个：改了任何组件都要把五个 `package.json` 的版本一起提到同一个值，再打 tag。
 
-## 组件一（`utils-main`）：递归技能发现、旧仓库路由与浏览器 UI
+## 组件一（`utils-agents`）：技能目录 —— 递归发现与模型可见性
 
 ```
 .dsh/skills/
@@ -120,6 +125,13 @@ pnpm release --dry-run   # 只看会不会发，不动 registry
 | `ignoreDirs` | `[".system","node_modules",".git"]` | 永不进入的目录名 |
 
 识别字段：`name`、`description`，可选 `whenToUse`、`disable-model-invocation`、`user-invocable`。非法文件记 warning，跳过。
+
+
+### 模型可见性（同一组件）
+
+配置页的「技能」开关列出当前会话能读到的 Skill：关掉 = 在 `ctx.skills.snapshot()` / `list()` 里把该技能标成 `modelInvocable: false`，模型下一轮拿到的 `<available_skills>` 里不再出现，**手动 `/名称` 仍可加载**。只能手动调用的技能显示「仅手动」，开关禁用。
+
+数据来源：`GET /api/dsh-utils/skill-panel/list`（Connection owner 认证）；带 `sessionId` 时用该会话的 cwd 与 preset skill 层，不带时用宿主默认工作目录。持久化在 `utils-agents` 命名空间的 `disabledSkills`（volatile，保存即生效）；这里只影响模型可见性，不改预设目录里的 `SKILL.md`——按预设开关技能仍在同一面板的「技能」视图（重命名 `SKILL.md` / `SKILL.md.disabled`）。
 
 ## 组件二：无人值守审批门控
 
@@ -315,31 +327,7 @@ template: |
 3. 两个 id 不能同时挂，否则同一事件发两遍。旧命名空间 `qq-notify` 的存量值不读取。按第 2 步搬。
 4. 环境变量（`DSH_QQ_NOTIFY_*`）不改。
 
-## 组件四：技能面板（宿主侧）
-
-右侧栏的「技能」卡片已并入组件五 utils-agents，不再单独注册。宿主侧仍保留原来的模型可见性开关与配置页：列出当前会话能读取到的 Skill（模型技能目录），每行一个开关。
-
-开关语义：关掉 = 在 `ctx.skills.snapshot()` / `list()` 里把该技能标成 `modelInvocable: false`，模型下一轮拿到的 `<available_skills>` 里不再出现；**手动 `/名称` 仍可加载**。不是 modelInvocable 的技能（只能手动调用的）显示「仅手动」，开关禁用。
-
-数据来源：`GET /api/dsh-utils/skill-panel/list`（Connection owner 认证）。带 `sessionId` 时用该会话的 cwd 与 preset skill 层；不带时用宿主默认工作目录。返回按名称排序，`enabled = modelInvocable && !disabled`。
-
-持久化：写 profile settings 的 `dsh-skill-panel` 命名空间：
-
-```yaml
-- id: dsh-skill-panel
-  config:
-    disabledSkills: []
-```
-
-`disabledSkills` 是 volatile，保存即生效、不用重启。面板本身不落盘。
-
-注意：这里只影响当前会话的模型可见性，不改预设目录里的 `SKILL.md`。按预设开关技能请用 utils-agents（重命名 `SKILL.md` / `SKILL.md.disabled`）。
-
-### 旧技能仓库路由
-
-`utils-main` 仍注册旧的全局仓库路由 `/api/dsh-utils-ui/*`（存储 `dsh-utils-ui.json`、`.deploy-key`），但不再有侧边栏卡片。新面板的「预设同步」也读写同一份存储与 Deploy Key 文件，用来拉取私有技能仓库；旧数据和旧路由保留，停用 `utils-agents` 不会影响它们。
-
-## 组件五：utils-agents
+## 组件四（`utils-agents` 面板）：预设、技能仓库与 AGENTS.md
 
 一个侧边栏面板，把原来的「技能」「技能仓库」「Markdown」三张卡片合在一起，并把 `~/.dsh/.agent-presets/<id>/` 注册成真正的 agent preset。顶部选择预设（或「全局 / 项目 AGENTS.md」），下面四个视图：
 
@@ -377,7 +365,7 @@ Deploy Key 按预设保存到 `$DSH_HOME/storages/dsh-utils-agents/<preset>.key`
 
 #### 版本检查
 
-面板顶部显示当前 bundle 版本（如 `v0.5.0`）、安装来源徽标（npm / GitHub / 本地）和「检查更新」按钮。宿主按 `updateCheckIntervalHours`（默认 6 小时）在后台检查，激活后约 15 秒先查一次；远端比当前版本新时，按钮旁出现「有新版本 x.y.z」。
+面板顶部显示当前 bundle 版本（如 `v0.6.0`）、安装来源徽标（npm / GitHub / 本地）和「检查更新」按钮。宿主按 `updateCheckIntervalHours`（默认 6 小时）在后台检查，激活后约 15 秒先查一次；远端比当前版本新时，按钮旁出现「有新版本 x.y.z」。
 
 查哪里取决于 profile 里 `@xi4z/dsh-utils` 的安装方式（读 profile 的 `package.json`）：
 
@@ -490,18 +478,33 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
 | `updateRegistry` | `https://registry.npmjs.org` | 查询发布版本用的 registry，可换镜像 |
 | `updateAutoInstall` | `true` | 查到新版本就后台执行 `pnpm add` 自动安装（重启后生效） |
 
-宿主半侧在 `packages/utils-agents/src/`（`index.ts` 路由、`presets.ts` 预设/技能/文件、`git.ts` 仓库同步、`update.ts` 发布版本检查），浏览器半侧仍是根包的 `client.js`。停用 `utils-agents` 行后路由消失，侧边栏 utils-agents 面板显示 404 提示。
+宿主半侧在 `packages/utils-agents/src/`（`index.ts` 路由、`presets.ts` 预设/技能/文件、`git.ts` 仓库同步、`update.ts` 发布版本检查），浏览器半侧在 `@xi4z/dsh-utils-ui` 的 `client.js`。停用 `utils-agents` 行后路由消失，侧边栏 utils-agents 面板显示 404 提示。
 
 ## 配置写法
 
 覆盖行只写 `id` 与 `config`，`name` 交给 bundle：
 
 ```yaml
-- id: utils-main
+- id: utils-agents
   config:
+    # 递归发现
     maxDepth: 6
     extraRoots:
       - D:/Core/Projects/Skill
+    # 模型可见性
+    disabledSkills: []
+    # 预设 / 技能仓库 / AGENTS.md
+    maxBytes: 524288
+    presetDirs: []
+    extraAgentsFiles: []
+    scanNestedAgents: false
+    nestedDepth: 3
+    defaultRepoUrl: https://github.com/xi4z/skills
+    defaultBranch: Agent
+    updateCheck: true
+    updateCheckIntervalHours: 6
+    updateRegistry: https://registry.npmjs.org
+    updateAutoInstall: true
 - id: dsh-approval-policy
   config:
     origins: [subagent, scheduled, cron]
@@ -514,63 +517,55 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
     gotifyToken: gtfya.该系列的token
     deviceLabel: 办公本
     dryRun: false
-- id: dsh-skill-panel
-  config:
-    disabledSkills: []
-- id: utils-agents
-  config:
-    maxBytes: 524288
-    presetDirs: []
-    extraAgentsFiles: []
-    scanNestedAgents: false
-    nestedDepth: 3
-    defaultRepoUrl: https://github.com/xi4z/skills
-    defaultBranch: Agent
-    updateCheck: true
-    updateCheckIntervalHours: 6
-    updateRegistry: https://registry.npmjs.org
-    updateAutoInstall: true
 ```
 
-五个组件 id（`utils-main` + 四个 subpath 组件）同时是 settings 命名空间；配置写 `cordis.patch.yml`：bundle 给默认，profile 按 id 覆盖。根包声明 `dsh.client`，`utils-main` 这个包根行同时让宿主加载 `client.js`；插件页每个挂载项都有配置页，右侧栏只有一个 utils-agents 面板。组件启用/停用、运行状态照常显示。
+三个宿主 id（`utils-agents`、`dsh-approval-policy`、`dsh-notify`）同时是 settings 命名空间；`utils-ui` 没有 config，只是浏览器半侧的挂载行。配置写 `cordis.patch.yml`：bundle 给默认，profile 按 id 覆盖。插件页每个挂载项都有配置页（由 `utils-ui` 的 `client.js` 注册：审批、通知各一页，utils-agents 一页三块），右侧栏只有一个 utils-agents 面板。组件启用/停用、运行状态照常显示。
 
-根包的 `client.js` 用 `ctx.configForms.whileServed(['utils-main','dsh-approval-policy','dsh-notify','dsh-skill-panel','utils-agents'], …)` 把五个组件配置页注册到 `plugins.row.config`（key = `@xi4z/dsh-utils#<挂载项 id>`），并注册 `sidebar.right.pane.tab` 的 utils-agents 面板。五个组件的配置字段全 volatile，写入走宿主 settings 文档，保存即生效；utils-agents 的仓库设置存在各预设的 `.dsh-utils/repo.json`，Deploy Key 存在 storages，Markdown 直接落盘。
+`@xi4z/dsh-utils-ui` 的 `client.js` 用 `ctx.configForms.whileServed(['dsh-approval-policy','dsh-notify','utils-agents'], …)` 把三个宿主的配置页注册到 `plugins.row.config`（key = `@xi4z/dsh-utils#<挂载项 id>`，因为插入这些行的是 bundle 包），并注册 `sidebar.right.pane.tab` 的 utils-agents 面板。三个宿主的配置字段全 volatile，写入走宿主 settings 文档，保存即生效；utils-agents 的仓库设置存在各预设的 `.dsh-utils/repo.json`，Deploy Key 存在 storages，Markdown 直接落盘。
+
+## 组件五（`utils-ui`）：共享浏览器界面
+
+宿主半侧只有一个空 `apply()`，价值全在 `client.js`：
+
+- 三个宿主行的配置页：`plugins.row.config`，key 是 `@xi4z/dsh-utils#<挂载项 id>`；utils-agents 一页含「递归技能发现 / 模型可见性 / 预设与技能仓库」三块，审批与通知各一页。字段表在 `client.js` 顶部。
+- 右侧栏 `utils-agents` 标签页：注册 tab 类型与 `sidebar.right.pane.tab` 面板体；面板里的路由由 `utils-agents` 宿主行提供。
+- 两套 Deploy Key 的保存/清除、技能仓库配置、版本检查与自动安装都在这个面板里，宿主路由全部在 `@xi4z/dsh-utils-utils-agents`。
+
+停用 `utils-ui` 只影响界面；宿主行继续工作。
 
 ## 包结构
 
 ```
-@xi4z/dsh-utils/            唯一的可安装包：bundle + 全部五个组件
-├── package.json              bundle patch/locale/icon + subpath exports + dsh.client
-├── pnpm-workspace.yaml       只用来把 packages/* 当 tsc/测试的构建单元
-├── cordis.patch.yml          五行：utils-main（包根）+ 四个 subpath 行
-├── locale/{en,zh}.json       bundle 展示名与 utils-main 行标题
+@xi4z/dsh-utils/            只做拼装的 bundle：patch + locale + icon，无组件代码
+├── package.json              dsh.bundle.patch；dependencies = 四个同版本组件
+├── pnpm-workspace.yaml       把 packages/* 串成一个 workspace，本地链接同版本组件
+├── cordis.patch.yml          四行：按裸包名挂四个组件
+├── locale/{en,zh}.json       bundle 展示名
 ├── icon.svg
-├── skills/dsh-approval-policy-config/SKILL.md
-├── client.js                 浏览器半侧：配置页 + 右侧栏 utils-agents 面板
-├── src/{index.ts,ui-host.ts} utils-main：递归发现 + 旧技能仓库路由
-├── lib/…                     编译产物（index.js / ui-host.js）
-├── scripts/release.mjs       只发根包，已发布版本跳过
-├── test/                     根包测试（utils-main / ui-host / client / 布局守卫）
-└── packages/
-    ├── approval-policy/      → 导出为 @xi4z/dsh-utils/approval-policy
-    ├── notify/               → 导出为 @xi4z/dsh-utils/notify
-    ├── skill-panel/          → 导出为 @xi4z/dsh-utils/skill-panel
-    └── utils-agents/         → 导出为 @xi4z/dsh-utils/utils-agents
+├── src/index.ts              export {}（构建成 lib/index.js，仅有 main 入口）
+├── scripts/release.mjs       按依赖顺序发五个包，已发布版本跳过
+├── test/layout.test.mjs      布局守卫
+└── packages/                 四个独立发布包
+    ├── approval-policy/      @xi4z/dsh-utils-approval-policy
+    ├── notify/               @xi4z/dsh-utils-notify
+    ├── utils-agents/         @xi4z/dsh-utils-utils-agents   行 utils-agents
+    │                         （嵌套发现 + 可见性 + 预设/仓库/AGENTS.md）
+    └── ui/                   @xi4z/dsh-utils-ui             行 utils-ui + client.js
 ```
 
-`packages/<名>/` 仍是标准的插件源码目录（`src/index.ts` + `locale/` + 自己的 `package.json` 供 tsc 与包内测试用），但**不单独发布**：根包的 `exports["./<名>"]` 指向它的 `lib/index.js`，`exports["./<名>/locale/*.json"]` 指向它的 locale，`files` 里的 `packages/*/lib` 与 `packages/*/locale` 负责打进 tarball。加组件＝新建 `packages/<名>/`，再在根 `package.json` 加两条 `exports`（入口 + locale）、在 `files` 已覆盖的前提下加一行 patch；`test/layout.test.mjs` 会检查这三处是否对齐。
+`packages/<名>/` 是标准插件包（`src/index.ts` + `locale/` + 自己的 `package.json`），各自 `publishConfig.access = public`、共享根包版本、由 `pnpm release` 单独发布。加组件＝新建 `packages/<名>/`，在根 `package.json` 加一条依赖、在 `cordis.patch.yml` 加一行、在 `test/layout.test.mjs` 的 `COMPONENTS` 里登记；只带浏览器半侧的组件还要声明 `dsh.client` 并导出 `./client`。
 
 ## 开发
 
 ```sh
 pnpm install
-pnpm build     # 根包（utils-main）+ packages/* 的 tsc -> lib/
-pnpm test      # 构建 + client.js 语法检查 + 布局守卫 + 各包 node --test（176 个用例）
+pnpm build     # 根包空入口 + packages/* 四个组件
+pnpm test      # 构建 + client.js 语法检查 + 布局守卫 + 五个包的 node --test
 ```
 
 ## 兼容性
 
-DeepSeek Harness `0.2.2-rc.1` 及以上。Node.js 22.19 及以上。运行时依赖 `@deepseek-ai/schemastery`；`client.js` 只依赖宿主提供的 React 运行时。utils-agents 面板需要宿主带右侧栏（web 组合默认带）。
+DeepSeek Harness `0.2.2-rc.1` 及以上。Node.js 22.19 及以上。宿主组件运行时依赖 `@deepseek-ai/schemastery`；`@xi4z/dsh-utils-ui` 的 `client.js` 只依赖宿主提供的 React 运行时。utils-agents 面板需要宿主带右侧栏（web 组合默认带）。
 
 ## License
 

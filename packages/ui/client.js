@@ -1,13 +1,15 @@
 /**
- * Browser half of `@xi4z/dsh-utils`, served from the root package: the
- * `utils-main` row is a package-root row and the package declares `dsh.client`,
- * so DSH's client-module scanner resolves this file from that row.
+ * Browser half of `@xi4z/dsh-utils-ui`, the shared UI component of the
+ * dsh-utils bundle: the `utils-ui` row mounts this bare package name and the
+ * package declares `dsh.client`, so DSH's client-module scanner resolves this
+ * file from that row.
  *
- * Registers one configuration page per row and the sidebar skill /
- * skill-repository panels. Host routes come from `src/ui-host.ts`.
+ * Registers one configuration page per dsh-utils row and the utils-agents
+ * sidebar panel. Host routes and the skill catalog switchboard come from
+ * `@xi4z/dsh-utils-utils-agents`.
  */
 window.__ModuleLoader__.load({
-  id: '@xi4z/dsh-utils',
+  id: '@xi4z/dsh-utils-ui',
   factory(require) {
     const React = require('react')
     const h = React.createElement
@@ -16,10 +18,8 @@ window.__ModuleLoader__.load({
     // page's configuration cell and each row's own page are keyed by the bundle
     // package name and by `${bundle}#${rowId}`.
     const BUNDLE = '@xi4z/dsh-utils'
-    const SKILL_NS = 'utils-main'
     const APPROVAL_NS = 'dsh-approval-policy'
     const NOTIFY_NS = 'dsh-notify'
-    const SKILL_PANEL_NS = 'dsh-skill-panel'
     const AGENTS_NS = 'utils-agents'
     const WB_TAB = 'utils-agents'
     const ORIGINS = [
@@ -383,8 +383,8 @@ window.__ModuleLoader__.load({
     //
     // The panel lists the Skill catalog the Host resolves for one Session (or
     // the default workspace when the row page opens it without a Session) and
-    // turns each model-invocable row into one switch over the `dsh-skill-panel`
-    // config namespace. A switch hides the Skill from the model catalog only;
+    // turns each model-invocable row into one switch over the merged
+    // `utils-agents` config namespace. A switch hides the Skill from the model catalog only;
     // /name still loads it manually, which is why the rest render as "仅手动".
 
     const PANEL_STYLE = `
@@ -474,7 +474,7 @@ window.__ModuleLoader__.load({
       }
       if (response.status === 401) throw new Error('登录状态已过期，请刷新页面后重试。')
       if (response.status === 404) {
-        throw new Error('宿主还没有加载技能面板组件（HTTP 404）。请重启 dsh web；如果已重启，请在插件页确认 dsh-skill-panel 行已启用。')
+        throw new Error('宿主还没有加载 utils-agents 组件（HTTP 404）。请重启 dsh web；如果已重启，请在插件页确认 utils-agents 行已启用。')
       }
       if (!response.ok) {
         let detail = ''
@@ -2214,15 +2214,8 @@ window.__ModuleLoader__.load({
     }
 
     function apply(ctx) {
-      const skillForm = ctx.configForms.get(SKILL_NS)
       const approvalForm = ctx.configForms.get(APPROVAL_NS)
       const notifyForm = ctx.configForms.get(NOTIFY_NS)
-      let skillPanelForm = null
-      try {
-        skillPanelForm = ctx.configForms.get(SKILL_PANEL_NS)
-      } catch {
-        skillPanelForm = null
-      }
       let agentsForm = null
       try {
         agentsForm = ctx.configForms.get(AGENTS_NS) || null
@@ -2230,17 +2223,10 @@ window.__ModuleLoader__.load({
         agentsForm = null
       }
       ctx.effect(() => () => {
-        skillForm.dispose()
         approvalForm.dispose()
         notifyForm.dispose()
-        if (skillPanelForm) skillPanelForm.dispose()
         if (agentsForm) agentsForm.dispose()
       }, 'dsh-utils: configuration forms')
-      const SkillRowPage = RowPage({
-        form: skillForm, fields: SKILL_FIELDS,
-        title: '递归技能发现',
-        intro: '嵌套目录里的 SKILL.md 递归发现。改动即时生效，并写入 dsh 的配置文档。',
-      })
       const ApprovalRowPage = RowPage({
         form: approvalForm, fields: APPROVAL_FIELDS,
         title: '无人值守审批门控',
@@ -2251,18 +2237,26 @@ window.__ModuleLoader__.load({
         title: '会话通知',
         intro: '会话结束、等待回答或等待授权时推送一条消息；出口是 Gotify 网关，多台设备共用一个 QQ 也能分清是谁。',
       })
-      const AgentsRowPage = agentsForm === null ? null : RowPage({
-        form: agentsForm, fields: AGENTS_FIELDS,
-        title: 'utils-agents',
-        intro: '右侧栏的 utils-agents 面板按预设统一管理 skills、技能仓库与 AGENTS.md。',
-      })
-
-      // The row page and the right-sidebar body mount the same panel; the
-      // sidebar body receives its Session as a standard slot prop.
-      const SkillPanelRowPage = () => h('div', { className: 'dsu-root' }, [
-        h('style', { key: 'style' }, STYLE + PANEL_STYLE),
-        h(SkillPanel, { key: 'panel', form: skillPanelForm }),
-      ])
+      // The merged utils-agents row page carries the former recursive-discovery,
+      // skill-panel and preset pages: one config form, three sections.
+      const AgentsRowPage = agentsForm === null ? null : function AgentsPage() {
+        return h('div', { className: 'dsu-root' }, [
+          h('style', { key: 'style' }, STYLE + PANEL_STYLE),
+          h(Section, {
+            key: 'discovery', form: agentsForm, fields: SKILL_FIELDS,
+            title: '递归技能发现',
+            intro: '嵌套目录里的 SKILL.md 递归发现。改动即时生效，并写入 dsh 的配置文档。',
+          }),
+          h('div', { className: 'dsu-section', key: 'visibility' }, [
+            h(SkillPanel, { key: 'panel', form: agentsForm }),
+          ]),
+          h(Section, {
+            key: 'agents', form: agentsForm, fields: AGENTS_FIELDS,
+            title: '预设与技能仓库',
+            intro: '右侧栏的 utils-agents 面板按预设统一管理 skills、技能仓库与 AGENTS.md。',
+          }),
+        ])
+      }
       // One utils-agents tab now carries what used to be three separate sidebar
       // cards: preset skills, the per-preset skill repository, and Markdown.
       const AgentsBody = (props) => h('div', { className: 'dswb-host' }, [
@@ -2289,13 +2283,8 @@ window.__ModuleLoader__.load({
 
       // Each component owns one page, keyed the way the Plugins page addresses a
       // row's configuration: `${bundle}#${rowId}`.
-      ctx.effect(() => ctx.configForms.whileServed([SKILL_NS, APPROVAL_NS, NOTIFY_NS, SKILL_PANEL_NS, AGENTS_NS], (served) => {
+      ctx.effect(() => ctx.configForms.whileServed([APPROVAL_NS, NOTIFY_NS, AGENTS_NS], (served) => {
         const offs = []
-        if (served.has(SKILL_NS)) {
-          offs.push(ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
-            name: 'plugins.row.config', key: `${BUNDLE}#${SKILL_NS}`,
-          }, SkillRowPage)))
-        }
         if (served.has(APPROVAL_NS)) {
           offs.push(ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
             name: 'plugins.row.config', key: `${BUNDLE}#${APPROVAL_NS}`,
@@ -2305,11 +2294,6 @@ window.__ModuleLoader__.load({
           offs.push(ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
             name: 'plugins.row.config', key: `${BUNDLE}#${NOTIFY_NS}`,
           }, NotifyRowPage)))
-        }
-        if (served.has(SKILL_PANEL_NS)) {
-          offs.push(ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
-            name: 'plugins.row.config', key: `${BUNDLE}#${SKILL_PANEL_NS}`,
-          }, SkillPanelRowPage)))
         }
         if (served.has(AGENTS_NS) && AgentsRowPage !== null) {
           offs.push(ctx.slots.inject('plugins.row.config', () => ctx.slots.register({

@@ -1,51 +1,40 @@
 # dsh-utils — bundle layer for the utility components.
 #
-# Everything ships in ONE package. The root package owns the patch + locale +
-# icon + browser bundle (client.js) and the `utils-main` component, and the
-# other four components are mounted as **subpath rows** of that same package
-# (`@xi4z/dsh-utils/utils-agents`), resolved through this package's `exports`.
-# A subpath row is not a package: DSH never reads its `package.json`; its display
-# title comes from the exported `./<subpath>/locale/*.json`. The upside is that
-# the manifest has no `@xi4z/*` dependencies at all, so the bundle installs from
-# a registry, a Git URL, a packed tarball or a local directory alike.
-# Because `utils-main` is a package-root row, DSH's client-module scanner also
-# serves this package's client.js from it.
+# This package mounts no component of its own: it is the same shape as the
+# shipped experimental bundles. Every component is an independently published
+# package (a real dependency of this bundle), and this patch assembles them:
 #
-# The `packages/` directories stay as build units for tsc and for the per-package
-# tests; they are not published.
-#
-#   utils-main           — the root package itself: recursive SKILL.md discovery
-#                          in nested skill folders, plus the legacy global
-#                          skill-repository JSON routes (their UI moved into
-#                          utils-agents) and the browser half (client.js).
 #   dsh-approval-policy  — unattended approval gate: subagent/scheduled/cron
 #                          approval requests wait a bounded window, then settle
 #                          with a fail-closed default instead of hanging forever.
 #   dsh-notify           — session notifications: a turn ending, a pending
 #                          approval, or a pending question is pushed through a
 #                          Gotify gateway, tagged with this device's name.
-#   dsh-skill-panel      — settings-page skill switchboard: lists the skills the
-#                          current session can read and hides disabled ones from
-#                          the model catalog while keeping them manually
-#                          invocable.
-#   utils-agents         — the agents/presets panel: registers each
-#                          ~/.dsh/.agent-presets/<id>/ directory as a real
-#                          agent preset through cordis:include, then serves
+#   utils-agents         — the one host component for skills and presets. It
+#                          registers each ~/.dsh/.agent-presets/<id>/ directory
+#                          as a real agent preset through cordis:include, serves
 #                          routes that list/toggle its skills, edit its
 #                          Markdown, and clone/fast-forward a Git repository
-#                          (public or private, via a Deploy Key) into it.
+#                          (public or private, via a Deploy Key) into it — and
+#                          it also owns recursive nested SKILL.md discovery plus
+#                          the model-facing skill visibility switches, merged
+#                          from the former utils-main and dsh-skill-panel rows.
+#   utils-ui             — the browser half shared by every row above: the
+#                          configuration page for each row and the utils-agents
+#                          sidebar panel. Its host half is an empty marker; the
+#                          client module scanner serves its client.js because
+#                          this row mounts the bare package name.
 #
-# Row ids double as settings namespaces and stay stable.
+# Row ids double as settings namespaces and stay stable. The plugin page keeps
+# addressing each row's configuration as `@xi4z/dsh-utils#<row id>`, because
+# this bundle is the package that inserted the row.
 
 - insert:
-    - id: utils-main
-      name: '@xi4z/dsh-utils'
-      config: {}
     - id: dsh-approval-policy
-      name: '@xi4z/dsh-utils/approval-policy'
+      name: '@xi4z/dsh-utils-approval-policy'
       config: {}
     - id: dsh-notify
-      name: '@xi4z/dsh-utils/notify'
+      name: '@xi4z/dsh-utils-notify'
       config:
         # 留空 = 内置默认。下面只列出最常改的几项，完整字段见 README。
         #
@@ -65,13 +54,8 @@
           - aborted
         notifyOnApproval: true
         notifyOnQuestion: true
-    - id: dsh-skill-panel
-      name: '@xi4z/dsh-utils/skill-panel'
-      config:
-        # 模型技能目录里隐藏的技能名；面板开关写入这里，热生效。
-        disabledSkills: []
     - id: utils-agents
-      name: '@xi4z/dsh-utils/utils-agents'
+      name: '@xi4z/dsh-utils-utils-agents'
       config:
         # 单文件读写上限（字节）。AGENTS.md 本质上也是提示词，别放太大。
         maxBytes: 524288
@@ -92,6 +76,19 @@
         # 新预设技能仓库的默认值。
         defaultRepoUrl: 'https://github.com/xi4z/skills'
         defaultBranch: 'Agent'
+        # 嵌套 SKILL.md 递归发现（原 utils-main 行）。
+        minDepth: 2
+        maxDepth: 8
+        watch: true
+        includeProjectRoots: true
+        includeUserRoots: true
+        extraRoots: []
+        ignoreDirs:
+          - .system
+          - node_modules
+          - .git
+        # 模型技能目录里隐藏的技能名（原 dsh-skill-panel 行）；仍可手动加载。
+        disabledSkills: []
         # 面板顶部的版本检查：定时查询 npm 上 @xi4z/dsh-utils 的 latest。
         # 手动「检查更新」按钮不受间隔限制；改镜像时把 updateRegistry 换掉。
         updateCheck: true
@@ -99,3 +96,5 @@
         updateRegistry: 'https://registry.npmjs.org'
         # 查到新版本就后台 pnpm add；装完要重启 dsh web。link:/file: 安装自动跳过。
         updateAutoInstall: true
+    - id: utils-ui
+      name: '@xi4z/dsh-utils-ui'

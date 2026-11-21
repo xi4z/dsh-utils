@@ -21,7 +21,7 @@ description: "dsh-utils bundle 里无人值守审批门控组件（挂载项 dsh
 六个键**全部 volatile**，也可以直接在 dsh 设置页热改；改 `cordis.patch.yml` 则需重启 dsh 生效。
 bundle 方式（装好 `dsh-utils`）自动挂载，无需手写挂载块。
 
-同一个 bundle 里的另一个组件是递归技能发现 + 技能仓库同步（id = `utils-main`），两者互不依赖，
+同一个 bundle 里还有技能/预设组件（id = `utils-agents`，含递归技能发现与模型可见性），两者互不依赖，
 可以单独禁用其中一个挂载项。
 
 ## 配置键
@@ -46,7 +46,7 @@ bundle 方式（装好 `dsh-utils`）自动挂载，无需手写挂载块。
 
 ```yaml
 - id: dsh-approval-policy
-  name: dsh-utils/approval-policy
+  name: '@xi4z/dsh-utils-approval-policy'
   config:
     origins: [subagent, scheduled, cron]   # cron 需 dsh-cron 的 source kind 补丁版
     windowSeconds: 300

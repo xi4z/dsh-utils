@@ -1,23 +1,19 @@
 /**
- * `dsh-utils` skill-panel component: a host-side switchboard for the skill
+ * `utils-agents` skill-visibility half: a host-side switchboard for the skill
  * catalog. The model-facing catalog is produced by filtering
- * `ctx.skills.snapshot()` on `invocation.modelInvocable`, so this component
- * pins `list` and `snapshot` on the registry instance and reports
+ * `ctx.skills.snapshot()` on `invocation.modelInvocable`, so this module pins
+ * `list` and `snapshot` on the registry instance and reports
  * `modelInvocable: false` for the skill names the user disabled. `get` is
  * deliberately untouched: a human can still load a disabled skill by name.
  *
  * The switchboard itself is a read-only route,
- * `GET /api/dsh-utils/skill-panel/list`, registered on the Connection API.
- * It reads the live Agent's workspace and skill layer so the panel matches the
- * catalog the current session actually sees, and it always calls the pinned
- * (unwrapped) discovery function, so disabled skills stay visible in the panel
- * with an off switch.
+ * `GET /api/dsh-utils/skill-panel/list` (path kept for the browser half),
+ * registered on the Connection API. It used to be the separate
+ * `@xi4z/dsh-utils-skill-panel` component; the bundle now mounts it as part of
+ * `@xi4z/dsh-utils-utils-agents`.
  *
- * @module dsh-utils/skill-panel
+ * @module @xi4z/dsh-utils-utils-agents/skill-panel
  */
-import z from '@deepseek-ai/schemastery';
-export const name = 'skill-panel';
-export const inject = ['skills'];
 /** Exact Connection route that serves the panel's skill list. */
 export const ROUTE_PATH = '/api/dsh-utils/skill-panel/list';
 /** Reply headers shared by successful and failed route responses. */
@@ -26,18 +22,11 @@ const JSON_HEADERS = {
     'cache-control': 'no-store',
 };
 /**
- * Settings schema. `disabledSkills` is volatile, so the Loader hands
- * {@link apply} a live reference and the component re-reads it on every call.
- */
-export const Config = z.object({
-    disabledSkills: z.array(z.string()).default([]).description('模型技能目录里隐藏的技能名。').volatile(),
-});
-/**
  * Activate the component.
  * @param ctx - host Cordis context; `skills` is guaranteed by {@link inject}.
  * @param config - row config; volatile fields arrive as live references.
  */
-export function apply(ctx, config = {}) {
+export function applySkillPanel(ctx, config = {}) {
     const registry = ctx.skills;
     // Capture the raw service instance, not the traceable proxy: a bound proxy
     // method still resolves `this.snapshot` dynamically and would run the pinned
@@ -63,10 +52,10 @@ export function apply(ctx, config = {}) {
                     restore();
                 }
                 catch (error) {
-                    ctx.logger.warn(`skill-panel: cannot restore the skill catalog methods: ${errorMessage(error)}`);
+                    ctx.logger.warn(`utils-agents skill-panel: cannot restore the skill catalog methods: ${errorMessage(error)}`);
                 }
             }
-        }, 'skill-panel: catalog filter');
+        }, 'utils-agents skill-panel: catalog filter');
     }
     registerRoute(ctx, config, originals);
 }
@@ -120,10 +109,10 @@ function registerRoute(ctx, config, originals) {
                 });
             }
             catch (error) {
-                ctx.logger.warn(`skill-panel: cannot register ${ROUTE_PATH}: ${errorMessage(error)}`);
+                ctx.logger.warn(`utils-agents skill-panel: cannot register ${ROUTE_PATH}: ${errorMessage(error)}`);
                 return () => Promise.resolve();
             }
-        }, `skill-panel: ${ROUTE_PATH}`);
+        }, `utils-agents skill-panel: ${ROUTE_PATH}`);
     });
 }
 /**
@@ -139,7 +128,7 @@ async function handleList(ctx, config, originals, request) {
         return json(await describe(ctx, config, originals, request), 200);
     }
     catch (error) {
-        ctx.logger.warn(`skill-panel: cannot list skills: ${errorMessage(error)}`);
+        ctx.logger.warn(`utils-agents skill-panel: cannot list skills: ${errorMessage(error)}`);
         return json({ error: errorMessage(error) }, 500);
     }
 }
@@ -240,7 +229,7 @@ function scopedRegistry(ctx, agent) {
                 return scoped;
         }
         catch (error) {
-            ctx.logger.debug(`skill-panel: preset skill layer lookup failed: ${errorMessage(error)}`);
+            ctx.logger.debug(`utils-agents skill-panel: preset skill layer lookup failed: ${errorMessage(error)}`);
         }
     }
     return ctx.skills;
@@ -261,7 +250,7 @@ async function resolveCwd(ctx, agent, workingDirectory, signal) {
                 return cwd;
         }
         catch (error) {
-            ctx.logger.debug(`skill-panel: working directory lookup failed: ${errorMessage(error)}`);
+            ctx.logger.debug(`utils-agents skill-panel: working directory lookup failed: ${errorMessage(error)}`);
         }
     }
     const sessionCwd = agent?.session?.header?.cwd;
@@ -417,4 +406,4 @@ function json(value, status) {
 function errorMessage(error) {
     return error instanceof Error ? error.message : String(error);
 }
-//# sourceMappingURL=index.js.map
+//# sourceMappingURL=skill-panel.js.map

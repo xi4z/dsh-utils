@@ -1,11 +1,11 @@
 {
   "name": "@xi4z/dsh-utils",
-  "version": "0.5.0",
-  "description": "DeepSeek Harness utility bundle: the root package carries the main component (recursive SKILL.md discovery, legacy Git skill-repository routes, and the browser UI) and mounts four components as its own subpaths (unattended approval gate, session notifications, skill panel, and utils-agents: the preset/skill panel that also pulls private repositories with a Deploy Key). It declares no @xi4z dependencies, so one spec installs everything from a registry name, a Git URL, a packed tarball or a local directory.",
+  "version": "0.6.0",
+  "description": "DeepSeek Harness utility bundle: a patch-only package that assembles four independently published components — the utils-agents preset/skill panel (nested SKILL.md discovery, model visibilities, skills, repositories and AGENTS.md), an unattended approval gate, session notifications, and the shared browser UI that configures every row.",
   "keywords": [
     "dsh",
-    "dsh-plugin",
     "dsh-bundle",
+    "dsh-plugin",
     "deepseek-harness",
     "skills",
     "skill-panel",
@@ -39,50 +39,17 @@
       "import": "./lib/index.js",
       "default": "./lib/index.js"
     },
-    "./ui-host": {
-      "types": "./lib/ui-host.d.ts",
-      "import": "./lib/ui-host.js",
-      "default": "./lib/ui-host.js"
-    },
-    "./approval-policy": {
-      "types": "./packages/approval-policy/lib/index.d.ts",
-      "import": "./packages/approval-policy/lib/index.js",
-      "default": "./packages/approval-policy/lib/index.js"
-    },
-    "./approval-policy/locale/*.json": "./packages/approval-policy/locale/*.json",
-    "./notify": {
-      "types": "./packages/notify/lib/index.d.ts",
-      "import": "./packages/notify/lib/index.js",
-      "default": "./packages/notify/lib/index.js"
-    },
-    "./notify/locale/*.json": "./packages/notify/locale/*.json",
-    "./skill-panel": {
-      "types": "./packages/skill-panel/lib/index.d.ts",
-      "import": "./packages/skill-panel/lib/index.js",
-      "default": "./packages/skill-panel/lib/index.js"
-    },
-    "./skill-panel/locale/*.json": "./packages/skill-panel/locale/*.json",
-    "./utils-agents": {
-      "types": "./packages/utils-agents/lib/index.d.ts",
-      "import": "./packages/utils-agents/lib/index.js",
-      "default": "./packages/utils-agents/lib/index.js"
-    },
-    "./utils-agents/locale/*.json": "./packages/utils-agents/locale/*.json",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
-    "./package.json": "./package.json",
-    "./client": "./client.js"
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
   },
   "files": [
     "lib",
-    "client.js",
     "src",
-    "packages/*/lib/**",
-    "packages/*/locale/**",
     "cordis.patch.yml",
     "locale",
-    "skills",
     "icon.svg",
     "README.md",
     "LICENSE"
@@ -93,19 +60,20 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && pnpm -r --filter \"./packages/*\" run build",
     "check": "tsc --noEmit -p tsconfig.json && pnpm -r --filter \"./packages/*\" run check",
-    "test": "pnpm build && node --check client.js && node --test test/*.test.mjs && pnpm -r --filter \"./packages/*\" run test",
+    "test": "pnpm build && node --check packages/ui/client.js && node --test test/*.test.mjs && pnpm -r --filter \"./packages/*\" run test",
     "release": "node scripts/release.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "~3.19.0"
+    "@xi4z/dsh-utils-approval-policy": "0.6.0",
+    "@xi4z/dsh-utils-notify": "0.6.0",
+    "@xi4z/dsh-utils-ui": "0.6.0",
+    "@xi4z/dsh-utils-utils-agents": "0.6.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.1.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
-    "@deepseek-ai/dsh-settings": "^0.2.2-rc.2",
-    "@deepseek-ai/dsh-skill": "0.2.2-rc.2",
     "@types/node": "^24.0.0",
     "typescript": "~5.9.0"
   },
@@ -115,10 +83,6 @@
     },
     "engines": {
       "dsh": ">=0.2.2-rc.1 <0.4.0-0"
-    },
-    "client": {
-      "platform": "web",
-      "inject": []
     }
   },
   "publishConfig": {

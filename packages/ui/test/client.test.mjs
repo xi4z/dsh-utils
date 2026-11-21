@@ -231,8 +231,8 @@ const NOTIFY_VALUE = {
   approvalTemplate: '',
 }
 
-function fakeCtx({ served = ['utils-main', 'dsh-approval-policy', 'dsh-notify', 'dsh-skill-panel', 'utils-agents'], skillValue, approvalValue, notifyValue, panelValue, workbenchValue, skillOptions, approvalOptions, notifyOptions, panelOptions, workbenchOptions } = {}) {
-  const skillForm = fakeForm(skillValue ?? {
+function fakeCtx({ served = ['dsh-approval-policy', 'dsh-notify', 'utils-agents'], agentsValue, approvalValue, notifyValue, agentsOptions, skillOptions, panelOptions, workbenchOptions } = {}) {
+  const agentsForm = fakeForm(agentsValue ?? {
     minDepth: 1,
     maxDepth: 8,
     watch: true,
@@ -243,18 +243,7 @@ function fakeCtx({ served = ['utils-main', 'dsh-approval-policy', 'dsh-notify', 
     followSymlinks: false,
     extraRoots: ['D:/Core/Projects/Skill'],
     ignoreDirs: ['.system', 'node_modules', '.git'],
-  }, skillOptions)
-  const approvalForm = fakeForm(approvalValue ?? {
-    origins: ['subagent', 'scheduled'],
-    sessions: [],
-    windowSeconds: 300,
-    defaultOutcome: 'rejected',
-    defaultPermissionPreset: 'auto',
-    autoReviewContent: true,
-  }, approvalOptions)
-  const notifyForm = fakeForm(notifyValue === undefined ? { ...NOTIFY_VALUE } : notifyValue, notifyOptions)
-  const panelForm = fakeForm(panelValue ?? { disabledSkills: [] }, panelOptions)
-  const workbenchForm = fakeForm(workbenchValue ?? {
+    disabledSkills: [],
     maxBytes: 524288,
     presetDirs: [],
     extraAgentsFiles: [],
@@ -262,17 +251,24 @@ function fakeCtx({ served = ['utils-main', 'dsh-approval-policy', 'dsh-notify', 
     nestedDepth: 3,
     defaultRepoUrl: 'https://github.com/xi4z/skills',
     defaultBranch: 'Agent',
-  }, workbenchOptions)
+  }, agentsOptions ?? skillOptions ?? panelOptions ?? workbenchOptions)
+  const approvalForm = fakeForm(approvalValue ?? {
+    origins: ['subagent', 'scheduled'],
+    sessions: [],
+    windowSeconds: 300,
+    defaultOutcome: 'rejected',
+    defaultPermissionPreset: 'auto',
+    autoReviewContent: true,
+  })
+  const notifyForm = fakeForm(notifyValue === undefined ? { ...NOTIFY_VALUE } : notifyValue)
   const registrations = []
   const tabTypes = []
   const effects = []
   const ctx = {
     configForms: {
       get: (namespace) => {
-        if (namespace === 'utils-main') return skillForm
+        if (namespace === 'utils-agents') return agentsForm
         if (namespace === 'dsh-notify') return notifyForm
-        if (namespace === 'dsh-skill-panel') return panelForm
-        if (namespace === 'utils-agents') return workbenchForm
         return approvalForm
       },
       whileServed: (namespaces, register) => {
@@ -303,9 +299,9 @@ function fakeCtx({ served = ['utils-main', 'dsh-approval-policy', 'dsh-notify', 
       return cleanup
     },
   }
-  return { ctx, skillForm, approvalForm, notifyForm, panelForm, workbenchForm, registrations, tabTypes, effects }
+  // The former skills / skill-panel / utils-agents forms are one namespace now.
+  return { ctx, agentsForm, skillForm: agentsForm, panelForm: agentsForm, workbenchForm: agentsForm, approvalForm, notifyForm, registrations, tabTypes, effects }
 }
-
 /** Load the browser half and mount it against the fake host. */
 async function mountClient(options) {
   // Every mount re-imports the bundle, so hook state starts empty for the
@@ -324,7 +320,7 @@ async function mountClient(options) {
   await import(modulePath.href)
   assert.equal(loaded.length, 1, 'the bundle registers exactly one client module')
   const definition = loaded[0]
-  assert.equal(definition.id, '@xi4z/dsh-utils')
+  assert.equal(definition.id, '@xi4z/dsh-utils-ui')
   const plugin = definition.factory((specifier) => {
     if (specifier === 'react') return React
     throw new Error(`unexpected client module request: ${specifier}`)
@@ -347,19 +343,17 @@ test('the client half registers one configuration page per mounted row', async (
   assert.deepEqual(keys, [
     'plugins.row.config:@xi4z/dsh-utils#dsh-approval-policy',
     'plugins.row.config:@xi4z/dsh-utils#dsh-notify',
-    'plugins.row.config:@xi4z/dsh-utils#dsh-skill-panel',
     'plugins.row.config:@xi4z/dsh-utils#utils-agents',
-    'plugins.row.config:@xi4z/dsh-utils#utils-main',
   ])
 })
 
 test('registration follows the namespaces the Host serves', async () => {
-  const { registrations } = await mountClient({ served: ['utils-main'] })
+  const { registrations } = await mountClient({ served: ['utils-agents'] })
   const keys = registrations
     .filter(({ options }) => options.name === 'plugins.row.config')
     .map(({ options }) => `${options.name}:${options.key}`)
     .sort()
-  assert.deepEqual(keys, ['plugins.row.config:@xi4z/dsh-utils#utils-main'])
+  assert.deepEqual(keys, ['plugins.row.config:@xi4z/dsh-utils#utils-agents'])
 })
 
 test('a served-none deployment registers no row configuration page', async () => {
@@ -373,7 +367,7 @@ test('a served-none deployment registers no row configuration page', async () =>
 
 test('skill page: initial draft reflects the Host values and saving writes only the changed field', async () => {
   const { registrations, skillForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-agents').component
 
   let tree = render(createElement(page, {}))
   assert.equal(textOf(tree).includes('递归技能发现'), true)
@@ -390,7 +384,7 @@ test('skill page: initial draft reflects the Host values and saving writes only 
 
 test('skill page: invalid and contradictory numbers block the save with a message', async () => {
   const { registrations, skillForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-agents').component
 
   let tree = render(createElement(page, {}))
   fieldControl(tree, '最小深度').props.onChange({ target: { value: '9' } })
@@ -414,7 +408,7 @@ test('skill page: invalid and contradictory numbers block the save with a messag
 
 test('skill page: list fields split into trimmed, non-empty lines', async () => {
   const { registrations, skillForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-agents').component
 
   let tree = render(createElement(page, {}))
   fieldControl(tree, '忽略的目录名').props.onChange({ target: { value: '.git\n\n  node_modules  \n' } })
@@ -426,7 +420,7 @@ test('skill page: list fields split into trimmed, non-empty lines', async () => 
 
 test('skill page: toggling the watch switch writes a boolean', async () => {
   const { registrations, skillForm } = await mountClient()
-  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-agents').component
 
   let tree = render(createElement(page, {}))
   checkbox(tree, '监听变化').props.onChange({ target: { checked: false } })
@@ -472,7 +466,7 @@ test('approval page: the schema bounds are enforced before the Host sees the wri
 
 test('an unwritable form renders read-only and cannot save', async () => {
   const { registrations } = await mountClient({ skillOptions: { writable: false } })
-  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-agents').component
 
   const tree = render(createElement(page, {}))
   assert.equal(fieldControl(tree, '最小深度').props.disabled, true)
@@ -482,34 +476,28 @@ test('an unwritable form renders read-only and cannot save', async () => {
 
 test('a loading or unavailable namespace says so instead of rendering empty inputs', async () => {
   const unavailable = await mountClient({ skillOptions: { status: 'unavailable' } })
-  const unavailablePage = unavailable.registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
+  const unavailablePage = unavailable.registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-agents').component
   assert.equal(textOf(render(createElement(unavailablePage, {}))).includes('没有向浏览器暴露'), true)
 
   const loading = await mountClient({ skillOptions: { status: 'loading' } })
-  const loadingPage = loading.registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-main').component
+  const loadingPage = loading.registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-agents').component
   assert.equal(textOf(render(createElement(loadingPage, {}))).includes('正在读取配置'), true)
 })
 
 test('the plugin disposes the forms it owns through an effect', async () => {
-  const { effects, skillForm, approvalForm, notifyForm, panelForm, workbenchForm } = await mountClient()
-  let skillDisposed = false
+  const { effects, agentsForm, approvalForm, notifyForm } = await mountClient()
+  let agentsDisposed = false
   let approvalDisposed = false
   let notifyDisposed = false
-  let panelDisposed = false
-  let markdownDisposed = false
-  skillForm.dispose = () => { skillDisposed = true }
+  agentsForm.dispose = () => { agentsDisposed = true }
   approvalForm.dispose = () => { approvalDisposed = true }
   notifyForm.dispose = () => { notifyDisposed = true }
-  panelForm.dispose = () => { panelDisposed = true }
-  workbenchForm.dispose = () => { markdownDisposed = true }
   const formsEffect = effects.find((entry) => entry.label === 'dsh-utils: configuration forms')
   assert.ok(formsEffect, 'the forms effect is registered')
   formsEffect.execute()()
-  assert.equal(skillDisposed, true)
+  assert.equal(agentsDisposed, true)
   assert.equal(approvalDisposed, true)
   assert.equal(notifyDisposed, true)
-  assert.equal(panelDisposed, true)
-  assert.equal(markdownDisposed, true)
 })
 
 // ------------------------------------------------------------------ notify --
@@ -621,7 +609,7 @@ function clearPanelGlobals() {
 /** Mount the skill panel row page (the sidebar tab was merged into Utils). */
 async function mountSidebarPanel({ body = PANEL_BODY, status = 200, handler, panelOptions } = {}) {
   const mounted = await mountClient({ panelOptions })
-  const page = mounted.registrations.find(({ options }) => options.name === 'plugins.row.config' && options.key === '@xi4z/dsh-utils#dsh-skill-panel').component
+  const page = mounted.registrations.find(({ options }) => options.name === 'plugins.row.config' && options.key === '@xi4z/dsh-utils#utils-agents').component
   const requested = []
   globalThis.document = { baseURI: 'http://127.0.0.1:3080/' }
   globalThis.fetch = async (url) => {
@@ -791,7 +779,7 @@ test('skills panel: 401 and transport failures read as actionable messages', asy
 
 test('skills panel: the row page mounts the same panel without a session query', async () => {
   const mounted = await mountClient()
-  const page = mounted.registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-skill-panel').component
+  const page = mounted.registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#utils-agents').component
   const requested = []
   globalThis.document = { baseURI: 'http://127.0.0.1:3080/' }
   globalThis.fetch = async (url) => {

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "工具集界面",
+    "description": "统一承载 dsh-utils 三个宿主的配置页（utils-agents、审批门控、会话通知）与右侧栏的 utils-agents 面板。"
+  }
+}

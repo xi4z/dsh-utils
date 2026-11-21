@@ -3,7 +3,7 @@ import { after, test } from 'node:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
-import { apply, Config, inject, name } from '../lib/index.js'
+import { applySkillDiscovery } from '../lib/skill-discovery.js'
 
 // ---------------------------------------------------------------- helpers --
 
@@ -73,7 +73,7 @@ function fakeCtx() {
  */
 function mount(config) {
   const ctx = fakeCtx()
-  apply(ctx, config)
+  applySkillDiscovery(ctx, config)
   assert.equal(ctx.registrations.length, 1, 'apply registers exactly one provider')
   const controller = new AbortController()
   let invalidations = 0
@@ -94,19 +94,22 @@ function rootConfig(root, overrides = {}) {
 
 // ------------------------------------------------------------- module shape --
 
-test('the component exports the plugin identity the bundle patch mounts', () => {
-  assert.equal(name, 'utils-main')
-  assert.deepEqual(inject, ['skills'])
-  assert.equal(typeof Config, 'function')
-})
-
-test('apply registers the provider, the settings listener, and one labelled effect', () => {
+test('applySkillDiscovery registers the provider, the settings listener, and one labelled effect', () => {
   const ctx = fakeCtx()
-  apply(ctx, {})
+  applySkillDiscovery(ctx, {})
   assert.equal(ctx.registrations.length, 1)
   assert.deepEqual(ctx.listeners.map((entry) => entry.event), ['settings/document-updated'])
   assert.equal(ctx.effects.length, 1)
-  assert.equal(ctx.effects[0].label, 'utils-main watcher')
+  assert.equal(ctx.effects[0].label, 'utils-agents skills: watcher')
+})
+
+test('the discovery provider reports the merged component name', async () => {
+  const ctx = fakeCtx()
+  applySkillDiscovery(ctx, {})
+  const controller = new AbortController()
+  const provider = ctx.registrations[0]({ signal: controller.signal, invalidate: () => {} })
+  controller.abort()
+  assert.equal(provider.name, 'utils-agents')
 })
 
 // ---------------------------------------------------------------- discovery --
@@ -164,7 +167,7 @@ test('a candidate carries provider, source, rank, locator, and resource base', a
 
   assert.equal(candidate.name, 'skill-a')
   assert.equal(candidate.description, 'Candidate shape.')
-  assert.equal(candidate.provider, 'utils-main')
+  assert.equal(candidate.provider, 'utils-agents')
   assert.equal(candidate.source, 'custom')
   assert.equal(candidate.rank, 310)
   assert.equal(candidate.path, path)
@@ -213,7 +216,7 @@ test('frontmatter: block description, quoted whenToUse, invocation flags', async
 
   const skill = await provider.get(candidate)
   assert.equal(skill.content, 'Rich body.')
-  assert.equal(skill.provider, 'utils-main')
+  assert.equal(skill.provider, 'utils-agents')
   assert.deepEqual(skill.invocation, { modelInvocable: true, userInvocable: false })
 })
 
@@ -272,10 +275,10 @@ test('get fast-fails on a candidate without a path', async () => {
 // ------------------------------------------------------------------ config --
 
 test('config: invalid values fail fast, unknown keys warn, extra roots resolve', async () => {
-  // Validation runs when the registry constructs the provider, not at apply().
+  // Validation runs when the registry constructs the provider, not at applySkillDiscovery().
   const createWith = (config) => {
     const ctx = fakeCtx()
-    apply(ctx, config)
+    applySkillDiscovery(ctx, config)
     try {
       ctx.registrations[0]({ signal: new AbortController().signal, invalidate: () => {} })
     } catch (error) {
@@ -307,7 +310,7 @@ test('config: volatile references are read through, and changes invalidate the c
   const live = { minDepth: 2, maxDepth: 8, watch: false, includeProjectRoots: false, includeUserRoots: false, extraRoots: [root], ignoreDirs: [] }
 
   const ctx = fakeCtx()
-  apply(ctx, Object.fromEntries(Object.keys(live).map((key) => [key, { get: () => live[key] }])))
+  applySkillDiscovery(ctx, Object.fromEntries(Object.keys(live).map((key) => [key, { get: () => live[key] }])))
   const controller = new AbortController()
   let invalidations = 0
   const provider = ctx.registrations[0]({ signal: controller.signal, invalidate: () => { invalidations += 1 } })
@@ -361,8 +364,3 @@ test('dispose stops the registration and is idempotent', async () => {
   await provider.dispose()
 })
 
-test('apply also mounts the repository-sync routes on a Connection host', () => {
-  const ctx = fakeCtx()
-  apply(ctx)
-  assert.deepEqual(ctx.injects, [['connection']], 'the merged component asks for the Connection service')
-})

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Utilities UI",
+    "description": "The shared browser half: one configuration page per dsh-utils host row (utils-agents, approval gate, notifications) and the utils-agents sidebar panel."
+  }
+}

@@ -1,5 +1,6 @@
 packages:
   - packages/*
 
-# packages/* 只是 tsc 与包内测试的构建单元：组件通过根包的 subpath exports
-# 发布，根包 manifest 里没有任何 @xi4z/* 依赖，所以不需要 linkWorkspacePackages。
+# 组件包各自发布（根 bundle 依赖它们）。仓库内开启 workspace 链接，`pnpm install`
+# 会把同版本的组件接到根包的 node_modules，构建与测试不需要先发版。
+linkWorkspacePackages: true

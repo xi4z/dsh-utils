@@ -5,10 +5,10 @@
  * clones or fast-forwards it with an optional Deploy Key, and the shared
  * preset scanner reads ".dsh/preset" from that checkout. When the shared
  * repository has no key path and no key of its own, the panel-wide Deploy Key
- * from git.js is used, so a private skills checkout pulls without extra setup. Settings and the
- * pasted key intentionally reuse the legacy global route's storage
- * ($DSH_HOME/storages/dsh-utils-ui.json and dsh-utils-ui.deploy-key), so both
- * surfaces describe the same repository and never fight over the same files.
+ * from git.js is used, so a private skills checkout pulls without extra setup.
+ * Settings and the pasted key intentionally keep the storage the former global
+ * repository route used ($DSH_HOME/storages/dsh-utils-ui.json and
+ * dsh-utils-ui.deploy-key), so an upgraded profile keeps its repository and key.
  *
  * @module dsh-utils/utils-agents/global-repo
  */

@@ -1,19 +1,20 @@
 /**
- * utils-agents: one component that merges the three surfaces that used
- * to be separate sidebar tabs.
+ * utils-agents: the one host component for skills and presets.
+ *
+ * It merges what used to be three separate packages/rows:
+ *
+ * - nested `SKILL.md` discovery from `@xi4z/dsh-utils-main`;
+ * - the model-facing skill visibility filter from
+ *   `@xi4z/dsh-utils-skill-panel`;
+ * - the preset panel (skills tree, Markdown editor, per-preset Git skill
+ *   repository, shared presets and native-preset import/export).
  *
  * The panel picks one preset directory (or the global AGENTS.md pseudo preset)
- * and then:
- *
- * - lists the preset skills/ tree, toggling SKILL.md and SKILL.md.disabled;
- * - edits the preset Markdown, AGENTS.md first;
- * - clones or fast-forwards a Git skill repository into the preset skills/
- *   directory.
- *
+ * and then lists its skills tree, edits its Markdown and syncs its repository.
  * All browser requests use opaque file ids; the preset id is re-resolved
  * against the configured preset roots on every call.
  *
- * @module dsh-utils/utils-agents
+ * @module @xi4z/dsh-utils-utils-agents
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -59,8 +60,24 @@ import { sharedPresetView, syncSharedPresets } from './shared.js'
 import { pullSharedRepo, saveSharedRepoConfig, saveSharedRepoKey, sharedRepoView } from './global-repo.js'
 import { importNativePresets, nativePresetView, publishPresets } from './native.js'
 import { createUpdateChecker, startUpdateWatcher, type UpdateChecker } from './update.js'
+import {
+  SKILL_DISCOVERY_DEFAULTS,
+  applySkillDiscovery,
+  type SkillDiscoveryConfig,
+} from './skill-discovery.js'
+import {
+  ROUTE_PATH as SKILL_PANEL_ROUTE,
+  applySkillPanel,
+  type SkillPanelConfig,
+} from './skill-panel.js'
 
 export const name = 'utils-agents'
+
+/** The merged component still needs the host skill registry. */
+export const inject = ['skills']
+
+/** Raw row config: agents settings plus the merged discovery and visibility fields. */
+export interface UtilsAgentsConfig extends AgentsConfig, SkillDiscoveryConfig, SkillPanelConfig {}
 
 /** Exact Connection routes owned by this component. */
 export const ROUTE_PATHS = {
@@ -81,6 +98,7 @@ export const ROUTE_PATHS = {
   native: '/api/dsh-utils/utils-agents/native-presets',
   nativeImport: '/api/dsh-utils/utils-agents/native-presets-import',
   publish: '/api/dsh-utils/utils-agents/presets-publish',
+  skillList: SKILL_PANEL_ROUTE,
 } as const
 
 /**
@@ -88,6 +106,31 @@ export const ROUTE_PATHS = {
  * references, so saving the form takes effect without a restart.
  */
 export const Config = z.object({
+  // -- nested SKILL.md discovery (merged from @xi4z/dsh-utils-main) --
+  minDepth: z.natural().min(1).default(SKILL_DISCOVERY_DEFAULTS.minDepth)
+    .description('第一个可能包含 SKILL.md 的目录层级。').volatile(),
+  maxDepth: z.natural().min(1).default(SKILL_DISCOVERY_DEFAULTS.maxDepth)
+    .description('递归扫描的最深目录层级。').volatile(),
+  watch: z.boolean().default(SKILL_DISCOVERY_DEFAULTS.watch)
+    .description('技能文件变化后刷新技能目录。').volatile(),
+  debounceMs: z.natural().default(SKILL_DISCOVERY_DEFAULTS.debounceMs)
+    .description('监听失效的合并间隔（毫秒）。').volatile(),
+  pollIntervalMs: z.natural().min(250).default(SKILL_DISCOVERY_DEFAULTS.pollIntervalMs)
+    .description('不支持递归监听时的兜底轮询间隔（毫秒）。').volatile(),
+  includeProjectRoots: z.boolean().default(SKILL_DISCOVERY_DEFAULTS.includeProjectRoots)
+    .description('扫描项目级 .dsh/skills 与 .agents/skills。').volatile(),
+  includeUserRoots: z.boolean().default(SKILL_DISCOVERY_DEFAULTS.includeUserRoots)
+    .description('扫描用户级技能根。').volatile(),
+  followSymlinks: z.boolean().default(SKILL_DISCOVERY_DEFAULTS.followSymlinks)
+    .description('跟随符号链接目录（带环路保护）。').volatile(),
+  extraRoots: z.array(z.string().min(1)).default([...SKILL_DISCOVERY_DEFAULTS.extraRoots])
+    .description('额外的技能根目录。').volatile(),
+  ignoreDirs: z.array(z.string().min(1)).default([...SKILL_DISCOVERY_DEFAULTS.ignoreDirs])
+    .description('永不进入的目录名。').volatile(),
+  // -- model-facing skill visibility (merged from @xi4z/dsh-utils-skill-panel) --
+  disabledSkills: z.array(z.string()).default([])
+    .description('模型技能目录里隐藏的技能名；仍可手动加载。').volatile(),
+  // -- preset panel, skill repositories and AGENTS.md --
   maxBytes: z.natural().min(1024).max(BODY_LIMIT_BYTES).default(DEFAULT_MAX_BYTES)
     .description('单个 Markdown 文件的读取/写入上限（字节）。').volatile(),
   presetDirs: z.array(z.string().min(1)).default([])
@@ -133,7 +176,12 @@ interface ConnectionLike {
  * @param ctx - host Cordis context.
  * @param config - row config; volatile fields arrive as live references.
  */
-export function apply(ctx: Context, config: AgentsConfig = {}): void {
+export function apply(ctx: Context, config: UtilsAgentsConfig = {}): void {
+  // The two former components are host-only halves of this one now; the browser
+  // half in @xi4z/dsh-utils-ui still renders their pages on this row.
+  applySkillDiscovery(ctx, config)
+  applySkillPanel(ctx, config)
+
   const legacy = createLegacyBridge(ctx, config)
   const updates = createUpdateChecker(ctx, () => normalizeOptions(config))
   startUpdateWatcher(ctx, updates, () => normalizeOptions(config))

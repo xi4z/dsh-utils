@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { promisify } from 'node:util'
-import { apply, ROUTE_PATHS } from '../lib/index.js'
+import { Config, apply, inject, name, ROUTE_PATHS } from '../lib/index.js'
 import { createUpdateChecker, installCommand, parseGitSpec } from '../lib/update.js'
 
 const runFile = promisify(execFile)
@@ -163,6 +163,16 @@ function fileByLabel(files, label) {
   assert.ok(row, 'file ' + label + ' is listed')
   return row
 }
+
+test('the merged component exports one identity and one config schema', () => {
+  assert.equal(name, 'utils-agents')
+  assert.deepEqual(inject, ['skills'])
+  assert.equal(typeof Config, 'function')
+  const resolved = Config({})
+  assert.deepEqual(resolved.disabledSkills.get(), [])
+  assert.equal(resolved.minDepth.get(), 2)
+  assert.equal(resolved.maxBytes.get(), 524288)
+})
 
 test('registers the utils-agents routes', async (t) => {
   const { connection } = await setup(t)
