@@ -9,16 +9,16 @@ importers:
   .:
     dependencies:
       '@xi4z/dsh-utils-approval-policy':
-        specifier: 0.7.0
+        specifier: 0.7.1
         version: link:packages/approval-policy
       '@xi4z/dsh-utils-notify':
-        specifier: 0.7.0
+        specifier: 0.7.1
         version: link:packages/notify
       '@xi4z/dsh-utils-ui':
-        specifier: 0.7.0
+        specifier: 0.7.1
         version: link:packages/ui
       '@xi4z/dsh-utils-utils-agents':
-        specifier: 0.7.0
+        specifier: 0.7.1
         version: link:packages/utils-agents
     devDependencies:
       '@deepseek-ai/cordis':

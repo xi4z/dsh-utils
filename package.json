@@ -1,6 +1,6 @@
 {
   "name": "@xi4z/dsh-utils",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "DeepSeek Harness utility bundle: a patch-only package that assembles four independently published components — the utils-agents preset/skill panel (nested SKILL.md discovery, model visibilities, skills, repositories and AGENTS.md), an unattended approval gate, session notifications, and the shared browser UI that configures every row.",
   "keywords": [
     "dsh",
@@ -64,10 +64,10 @@
     "release": "node scripts/release.mjs"
   },
   "dependencies": {
-    "@xi4z/dsh-utils-approval-policy": "0.7.0",
-    "@xi4z/dsh-utils-notify": "0.7.0",
-    "@xi4z/dsh-utils-ui": "0.7.0",
-    "@xi4z/dsh-utils-utils-agents": "0.7.0"
+    "@xi4z/dsh-utils-approval-policy": "0.7.1",
+    "@xi4z/dsh-utils-notify": "0.7.1",
+    "@xi4z/dsh-utils-ui": "0.7.1",
+    "@xi4z/dsh-utils-utils-agents": "0.7.1"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.1.0"
