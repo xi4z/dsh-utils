@@ -1,6 +1,6 @@
 {
   "name": "@xi4z/dsh-utils-approval-qq",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "dsh-utils component: mirror approval requests to QQ as markdown cards with inline keyboard buttons, answering the host approval waterfall from a button click.",
   "license": "MIT",
   "author": "xi4z",

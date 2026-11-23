@@ -296,7 +296,7 @@ window.__ModuleLoader__.load({
             return
           }
           const revision = typeof current?.revision === 'number' ? current.revision : state.revision
-          if (directMutate !== null && ns !== undefined) {
+          if (typeof directMutate === 'function' && ns !== undefined) {
             // Write through the Host API directly so a refusal keeps its reason;
             // the shared form refreshes from settings/document-updated.
             let response
@@ -595,7 +595,7 @@ window.__ModuleLoader__.load({
 
       /** Persist the disabled-skill list, returning the Host's refusal reason when it refuses. */
       const persistSkills = async (next) => {
-        if (directMutate === null || ns === undefined) return await form.set('disabledSkills', next)
+        if (typeof directMutate !== 'function' || ns === undefined) return await form.set('disabledSkills', next)
         const current = typeof form.getSnapshot === 'function' ? form.getSnapshot() : null
         const response = await directMutate(ns, [{ op: 'set', path: ['disabledSkills'], value: next }], current?.revision)
         if (response !== null && typeof response === 'object' && response.ok === true) return true
