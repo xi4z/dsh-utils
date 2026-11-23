@@ -604,6 +604,7 @@ template: |
 - 配置页：`plugins.row.config`，key 是 `@xi4z/dsh-utils#<行 id>`；utils-agents 一页含「递归技能发现 / 模型可见性 / 预设与技能仓库」三块，审批门控、QQ 审批卡片与通知各一页。
 - 右侧栏：`sidebar.right.pane.tab` 的 `utils-agents` 面板，路由全部由 `@xi4z/dsh-utils-utils-agents` 提供。
 - 两套 Deploy Key 的保存/清除、技能仓库配置、版本检查与自动安装都在这个面板里。
+- 保存失败会带回宿主的真实原因：页面直接调 `settings.mutate`，把 `settings/conflict`（并显示两端的 revision）、`settings/rejected` 等失败原文显示在保存按钮旁；技能开关的总线同样显示原因后再还原。写失败后条目被重载或 revision 变化时，刷新页面再保存即可。
 
 停用 `utils-ui` 只失去界面与面板，四个宿主行继续工作。
 

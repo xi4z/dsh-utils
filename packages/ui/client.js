@@ -235,8 +235,30 @@ window.__ModuleLoader__.load({
       return ops
     }
 
+    /**
+     * Explain one failed settings write. The Host answers a refusal with
+     * `{ code, message, details }`; the shared form controller only keeps the
+     * boolean, so the reason is read from the wire result we keep here.
+     */
+    function rejectionReason(error) {
+      if (error === null || typeof error !== 'object') return '宿主没有返回原因。'
+      const code = typeof error.code === 'string' ? error.code : ''
+      const message = typeof error.message === 'string' ? error.message.trim() : ''
+      if (code === 'settings/conflict') {
+        const details = error.details
+        const expected = details === null || typeof details !== 'object' ? undefined : details.expected
+        const actual = details === null || typeof details !== 'object' ? undefined : details.actual
+        const revision = typeof expected === 'number' && typeof actual === 'number'
+          ? `（revision ${expected} → ${actual}）`
+          : ''
+        return `配置在页面读取之后被改过${revision}，请刷新页面后重试`
+      }
+      if (message === '') return code === '' ? '宿主没有返回原因。' : code
+      return code === '' || code === 'settings/rejected' ? message : `${message}（${code}）`
+    }
+
     /** One component's configuration section: fields, validation, save. */
-    function Section({ form, fields, title, intro }) {
+    function Section({ form, fields, title, intro, ns, directMutate }) {
       const state = form.getSnapshot()
       const [draft, setDraft] = React.useState(() => toDraft(fields, state.value))
       const [status, setStatus] = React.useState('')
@@ -265,12 +287,33 @@ window.__ModuleLoader__.load({
       const save = async () => {
         setStatus('保存中…')
         try {
-          const ops = changesOf(fields, parseDraft(fields, draft), state.value ?? {})
+          // Re-read the snapshot at click time: a page kept open while the Host
+          // reloaded entries would otherwise send a stale revision.
+          const current = typeof form.getSnapshot === 'function' ? form.getSnapshot() : state
+          const ops = changesOf(fields, parseDraft(fields, draft), current?.value ?? state.value ?? {})
           if (ops.length === 0) {
             setStatus('已保存')
             return
           }
-          const accepted = await form.mutate(ops, state.revision)
+          const revision = typeof current?.revision === 'number' ? current.revision : state.revision
+          if (directMutate !== null && ns !== undefined) {
+            // Write through the Host API directly so a refusal keeps its reason;
+            // the shared form refreshes from settings/document-updated.
+            let response
+            try {
+              response = await directMutate(ns, ops, revision)
+            } catch (failure) {
+              setStatus('宿主拒绝了这次修改：' + (failure instanceof Error ? failure.message : String(failure)))
+              return
+            }
+            if (response !== null && typeof response === 'object' && response.ok === true) {
+              setStatus('已保存')
+              return
+            }
+            setStatus('宿主拒绝了这次修改：' + rejectionReason(response?.error))
+            return
+          }
+          const accepted = await form.mutate(ops, revision)
           setStatus(accepted ? '已保存' : '宿主拒绝了这次修改。')
         } catch (error) {
           setStatus(error instanceof Error ? error.message : String(error))
@@ -497,7 +540,7 @@ window.__ModuleLoader__.load({
     }
 
     /** The Skill catalog panel shared by the right sidebar and the plugin row page. */
-    function SkillPanel({ form, sessionId }) {
+    function SkillPanel({ form, sessionId, ns, directMutate }) {
       // Every hook runs before the first early return: the panel renders a
       // loading, error, empty or populated branch on the same hook layout.
       const [status, setStatus] = React.useState('loading')
@@ -550,6 +593,15 @@ window.__ModuleLoader__.load({
       const disabledSet = new Set(disabled)
       const reload = () => setReloadKey((key) => key + 1)
 
+      /** Persist the disabled-skill list, returning the Host's refusal reason when it refuses. */
+      const persistSkills = async (next) => {
+        if (directMutate === null || ns === undefined) return await form.set('disabledSkills', next)
+        const current = typeof form.getSnapshot === 'function' ? form.getSnapshot() : null
+        const response = await directMutate(ns, [{ op: 'set', path: ['disabledSkills'], value: next }], current?.revision)
+        if (response !== null && typeof response === 'object' && response.ok === true) return true
+        throw new Error(rejectionReason(response?.error))
+      }
+
       const toggle = async (skill, enabled) => {
         if (!skill.modelInvocable || writing !== '') return
         if (!form || typeof form.set !== 'function') {
@@ -566,14 +618,14 @@ window.__ModuleLoader__.load({
         setDisabled(next)
         setWriting(skill.name)
         try {
-          const accepted = await form.set('disabledSkills', next)
+          const accepted = await persistSkills(next)
           if (accepted === false) {
             setDisabled(before)
             setSaveError('宿主拒绝了这次修改，开关已还原。')
           }
         } catch (failure) {
           setDisabled(before)
-          setSaveError(failure instanceof Error ? failure.message : String(failure))
+          setSaveError('宿主拒绝了这次修改，开关已还原：' + (failure instanceof Error ? failure.message : String(failure)))
         } finally {
           setWriting('')
         }
@@ -2208,12 +2260,32 @@ window.__ModuleLoader__.load({
           h(Section, {
             key: 'section', form: config.form, fields: config.fields,
             title: config.title, intro: config.intro,
+            ns: config.ns, directMutate: config.directMutate,
           }),
         ])
       }
     }
 
     function apply(ctx) {
+      // The shared form controller keeps only the boolean outcome of a write;
+      // calling the Host API directly keeps the refusal reason for the page.
+      const remote = (() => {
+        try {
+          return typeof ctx.get === 'function' ? ctx.get('remote') : undefined
+        } catch {
+          return undefined
+        }
+      })()
+      const directMutate = (() => {
+        try {
+          const settings = remote === undefined || remote === null ? undefined : remote.settings
+          return settings !== undefined && settings !== null && typeof settings.mutate === 'function'
+            ? settings.mutate.bind(settings)
+            : null
+        } catch {
+          return null
+        }
+      })()
       const approvalForm = ctx.configForms.get(APPROVAL_NS)
       const notifyForm = ctx.configForms.get(NOTIFY_NS)
       let agentsForm = null
@@ -2228,12 +2300,12 @@ window.__ModuleLoader__.load({
         if (agentsForm) agentsForm.dispose()
       }, 'dsh-utils: configuration forms')
       const ApprovalRowPage = RowPage({
-        form: approvalForm, fields: APPROVAL_FIELDS,
+        form: approvalForm, fields: APPROVAL_FIELDS, ns: APPROVAL_NS, directMutate,
         title: '无人值守审批门控',
         intro: '给 subagent／定时／cron 的审批请求设定应答窗口，超时按 fail-closed 落定。',
       })
       const NotifyRowPage = RowPage({
-        form: notifyForm, fields: NOTIFY_FIELDS,
+        form: notifyForm, fields: NOTIFY_FIELDS, ns: NOTIFY_NS, directMutate,
         title: '会话通知',
         intro: '会话结束、等待回答或等待授权时推送一条消息；出口是 Gotify 网关，多台设备共用一个 QQ 也能分清是谁。',
       })
@@ -2243,15 +2315,15 @@ window.__ModuleLoader__.load({
         return h('div', { className: 'dsu-root' }, [
           h('style', { key: 'style' }, STYLE + PANEL_STYLE),
           h(Section, {
-            key: 'discovery', form: agentsForm, fields: SKILL_FIELDS,
+            key: 'discovery', form: agentsForm, fields: SKILL_FIELDS, ns: AGENTS_NS, directMutate,
             title: '递归技能发现',
             intro: '嵌套目录里的 SKILL.md 递归发现。改动即时生效，并写入 dsh 的配置文档。',
           }),
           h('div', { className: 'dsu-section', key: 'visibility' }, [
-            h(SkillPanel, { key: 'panel', form: agentsForm }),
+            h(SkillPanel, { key: 'panel', form: agentsForm, ns: AGENTS_NS, directMutate }),
           ]),
           h(Section, {
-            key: 'agents', form: agentsForm, fields: AGENTS_FIELDS,
+            key: 'agents', form: agentsForm, fields: AGENTS_FIELDS, ns: AGENTS_NS, directMutate,
             title: '预设与技能仓库',
             intro: '右侧栏的 utils-agents 面板按预设统一管理 skills、技能仓库与 AGENTS.md。',
           }),
@@ -2309,6 +2381,8 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'configForms', 'sidebarRightTabs'],
       apply,
+      // Exported for the workspace test; the Loader ignores extra keys.
+      rejectionReason,
     }
   },
 })
