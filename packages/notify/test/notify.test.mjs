@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { apply, renderMessage, renderApprovalMessage, callAction } from '../lib/index.js'
+import { apply, renderMessage, renderApprovalMessage, callAction, Config } from '../lib/index.js'
 
 /** Start a minimal OneBot 11 HTTP endpoint and record what it receives. */
 async function startMock() {
@@ -762,22 +762,22 @@ test('live settings refs are re-read on every event', async (t) => {
 
 // ---- secrets from the environment ----
 
-test('an ${ENV} reference in gotify url/token is expanded at send time', async (t) => {
+test('gotify url still expands ENV; the token is explicit and ignores the environment', async (t) => {
   const mock = await startMock()
   t.after(() => mock.close())
   const agent = { id: 'sess-env1', session: { header: { cwd: '/root/core' } } }
   const ctx = fakeContext([agent])
   process.env.DSU_TEST_GOTIFY_URL = 'http://127.0.0.1:' + mock.port
-  process.env.DSU_TEST_GOTIFY_TOKEN = 'gtfya.from-env'
+  process.env.DSH_QQ_NOTIFY_GOTIFY_TOKEN = 'gtfya.from-env'
   t.after(() => {
     delete process.env.DSU_TEST_GOTIFY_URL
-    delete process.env.DSU_TEST_GOTIFY_TOKEN
+    delete process.env.DSH_QQ_NOTIFY_GOTIFY_TOKEN
   })
   apply(ctx, {
     enabled: true,
     transport: 'gotify',
     gotifyUrl: '${DSU_TEST_GOTIFY_URL}',
-    gotifyToken: '${DSU_TEST_GOTIFY_TOKEN}',
+    gotifyToken: 'gtfya.explicit',
     dryRun: false,
     timeoutMs: 3000,
   })
@@ -788,8 +788,16 @@ test('an ${ENV} reference in gotify url/token is expanded at send time', async (
   await settle(150)
 
   assert.equal(mock.requests.length, 1)
-  assert.equal(mock.requests[0].headers['x-gotify-key'], 'gtfya.from-env')
+  assert.equal(mock.requests[0].headers['x-gotify-key'], 'gtfya.explicit')
   assert.match(mock.requests[0].body.message, /目录: \/root\/core/)
+})
+
+test('gotifyToken is a write-only secret in the settings schema', () => {
+  const json = Config.toJSON()
+  const refs = Object.values(json.refs ?? {})
+  const field = refs.find((ref) => typeof ref?.meta?.description === 'string' && ref.meta.description.startsWith('Gotify application token'))
+  assert.ok(field, 'gotifyToken schema ref not found')
+  assert.equal(field.meta.role, 'secret')
 })
 
 test('per-target urlEnv/tokenEnv name the variables and ${ENV:-fallback} keeps a default', async (t) => {

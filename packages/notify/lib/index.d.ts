@@ -29,9 +29,11 @@
  * settings page takes effect without a restart.
  *
  * Ported from `@local/dsh-plugin-qq-notify` 0.2.0 — same message
- * templates, same environment overrides (`DSH_QQ_NOTIFY_*`), same delivery
- * semantics — with the settings schema, live config reads, and the
- * `dsh-utils` bundle wiring added.
+ * templates, same `DSH_QQ_NOTIFY_*` overrides for non-secret fields, same
+ * delivery semantics — with the settings schema, live config reads, and the
+ * `dsh-utils` bundle wiring added. `gotifyToken` is the one deliberate
+ * exception: an explicit write-only secret (`role('secret')`), never expanded
+ * from the environment.
  *
  * @module dsh-utils/notify
  */

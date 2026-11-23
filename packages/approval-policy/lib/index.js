@@ -204,6 +204,18 @@ export function shouldGate(config, sessionId, facts) {
     return false;
 }
 /**
+ * Describe the policy for one request: the exact predicate the gate will apply
+ * plus the window it will apply it with. Pure, so both the gate and any human
+ * channel can render and enforce the same deadline.
+ */
+export function describeGate(config, agent, sessionId) {
+    return {
+        gated: shouldGate(config, sessionId, readFacts(agent)),
+        windowMs: Math.max(0, config.windowSeconds * 1000),
+        defaultOutcome: config.defaultOutcome,
+    };
+}
+/**
  * The gate: delegate first, race the downstream chain against the window.
  *
  * windowMs <= 0 denies immediately WITHOUT calling `decision` (the 0 = instant
@@ -341,6 +353,20 @@ export function apply(ctx, config) {
     });
     /** Window-rejected auto-review requests, keyed by tool-call id. */
     const pendingAutoReview = new Map();
+    /**
+     * Publish the read-only policy view. The service is optional by design: a
+     * composition without this component simply has no approvalPolicyInfo, and
+     * a human channel then shows no countdown (there is no gate deadline).
+     */
+    const policyInfo = {
+        describe(agent, sessionId) {
+            return describeGate(cfgNow(), agent, sessionId);
+        },
+    };
+    const provideService = ctx.provide;
+    if (typeof provideService === 'function') {
+        ctx.effect(() => provideService('approvalPolicyInfo', policyInfo));
+    }
     const listener = async (request, next) => {
         const cfg = cfgNow();
         const sessionId = String(request.agent?.id ?? '');

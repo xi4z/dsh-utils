@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "QQ approval cards",
+    "description": "Mirrors pending approvals to QQ as a markdown card with allow/deny buttons, echoing the unattended gate deadline."
+  }
+}

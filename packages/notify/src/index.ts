@@ -29,9 +29,11 @@
  * settings page takes effect without a restart.
  *
  * Ported from `@local/dsh-plugin-qq-notify` 0.2.0 — same message
- * templates, same environment overrides (`DSH_QQ_NOTIFY_*`), same delivery
- * semantics — with the settings schema, live config reads, and the
- * `dsh-utils` bundle wiring added.
+ * templates, same `DSH_QQ_NOTIFY_*` overrides for non-secret fields, same
+ * delivery semantics — with the settings schema, live config reads, and the
+ * `dsh-utils` bundle wiring added. `gotifyToken` is the one deliberate
+ * exception: an explicit write-only secret (`role('secret')`), never expanded
+ * from the environment.
  *
  * @module dsh-utils/notify
  */
@@ -105,7 +107,6 @@ const ENV = {
   targetType: 'DSH_QQ_NOTIFY_TARGET_TYPE',
   targetId: 'DSH_QQ_NOTIFY_TARGET_ID',
   gotifyUrl: 'DSH_QQ_NOTIFY_GOTIFY_URL',
-  gotifyToken: 'DSH_QQ_NOTIFY_GOTIFY_TOKEN',
   deviceName: 'DSH_QQ_NOTIFY_DEVICE',
   deviceLabel: 'DSH_QQ_NOTIFY_DEVICE_LABEL',
   targets: 'DSH_QQ_NOTIFY_TARGETS',
@@ -128,7 +129,7 @@ export const Config = z.object({
   targetType: z.union(['private', 'group']).default(DEFAULTS.targetType).description('Legacy OneBot recipient kind.').volatile(),
   targetId: z.string().default(DEFAULTS.targetId).description('Legacy OneBot recipient id.').volatile(),
   gotifyUrl: z.string().default(DEFAULTS.gotifyUrl).description('Gotify gateway base URL.').volatile(),
-  gotifyToken: z.string().default(DEFAULTS.gotifyToken).description('Gotify application token; supports ${ENV} references.').volatile(),
+  gotifyToken: z.string().default(DEFAULTS.gotifyToken).role('secret').description('Gotify application token. Write-only secret: editable in settings, never returned to the browser; configure it explicitly (no env interpolation).').volatile(),
   gotifyPriority: z.natural().default(DEFAULTS.gotifyPriority).description('Default message priority.').volatile(),
   gotifyHeaders: z.any().default({}).description('Extra request headers for the gateway.').volatile(),
   targets: z.any().default([]).description('Multiple gateway targets; supports ${ENV} in url/token and urlEnv/tokenEnv.').volatile(),
@@ -346,7 +347,8 @@ export function normalizeOptions(config: NotifyConfig | undefined): Options {
     targetType: value<string>('targetType') === 'group' ? 'group' : 'private',
     targetId: str(expandEnv(value<string>('targetId')), DEFAULTS.targetId),
     gotifyUrl: str(expandEnv(value<string>('gotifyUrl')), DEFAULTS.gotifyUrl),
-    gotifyToken: str(expandEnv(value<string>('gotifyToken')), DEFAULTS.gotifyToken),
+    // Deliberately not expandEnv: the token is an explicit write-only secret.
+    gotifyToken: str(value<string>('gotifyToken'), DEFAULTS.gotifyToken),
     gotifyPriority: num(value<number>('gotifyPriority'), DEFAULTS.gotifyPriority),
     gotifyHeaders: normalizeHeaders(value<unknown>('gotifyHeaders')),
     targets: normalizeTargets(value<unknown>('targets'), num(value<number>('gotifyPriority'), DEFAULTS.gotifyPriority)),

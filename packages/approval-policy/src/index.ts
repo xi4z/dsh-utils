@@ -89,6 +89,29 @@ export type UnattendedOrigin = 'subagent' | 'scheduled' | 'cron' | 'all'
  */
 export type GatedOutcome = 'rejected' | 'unavailable'
 
+/**
+ * Read-only view of the gate policy, published on the cordis context so a
+ * human channel (e.g. the QQ approval card) can echo the real deadline instead
+ * of inventing its own TTL. `describe` reuses the exact predicate the gate
+ * applies to the request, so the card and the window can never disagree.
+ */
+export interface ApprovalPolicyInfo {
+  describe(agent: unknown, sessionId: string): {
+    /** Would this request enter the unattended window at all. */
+    gated: boolean
+    /** Window length in milliseconds; 0 means the gate denies immediately. */
+    windowMs: number
+    /** What the gate settles with when the window expires. */
+    defaultOutcome: GatedOutcome
+  }
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    approvalPolicyInfo: ApprovalPolicyInfo
+  }
+}
+
 /** Settings-page schema; each key arrives as a volatile live reference. */
 export const Config = z.object({
   /** Session/turn origins treated as unattended. Default: subagent + scheduled. */
@@ -268,6 +291,28 @@ export function shouldGate(
   if (kind === 'schedule' && origins.includes('scheduled')) return true
   if (kind === 'cron' && origins.includes('cron')) return true
   return false
+}
+
+/**
+ * Describe the policy for one request: the exact predicate the gate will apply
+ * plus the window it will apply it with. Pure, so both the gate and any human
+ * channel can render and enforce the same deadline.
+ */
+export function describeGate(
+  config: {
+    readonly origins: readonly UnattendedOrigin[]
+    readonly sessions: readonly string[]
+    readonly windowSeconds: number
+    readonly defaultOutcome: GatedOutcome
+  },
+  agent: AgentLike | undefined,
+  sessionId: string,
+): { gated: boolean, windowMs: number, defaultOutcome: GatedOutcome } {
+  return {
+    gated: shouldGate(config, sessionId, readFacts(agent)),
+    windowMs: Math.max(0, config.windowSeconds * 1000),
+    defaultOutcome: config.defaultOutcome,
+  }
 }
 
 /** Which side of the race produced the settled outcome. */
@@ -476,6 +521,21 @@ export function apply(ctx: Context, config: GateRuntimeConfig): void {
 
   /** Window-rejected auto-review requests, keyed by tool-call id. */
   const pendingAutoReview = new Map<string, AutoReviewSettle>()
+
+  /**
+   * Publish the read-only policy view. The service is optional by design: a
+   * composition without this component simply has no approvalPolicyInfo, and
+   * a human channel then shows no countdown (there is no gate deadline).
+   */
+  const policyInfo: ApprovalPolicyInfo = {
+    describe(agent, sessionId) {
+      return describeGate(cfgNow(), agent as AgentLike, sessionId)
+    },
+  }
+  const provideService = (ctx as unknown as { provide?: (name: string, value: unknown) => () => void }).provide
+  if (typeof provideService === 'function') {
+    ctx.effect(() => provideService('approvalPolicyInfo', policyInfo))
+  }
 
   const listener = async (
     request: ApprovalRequestEvent,

@@ -1,0 +1,57 @@
+{
+  "name": "@xi4z/dsh-utils-approval-qq",
+  "version": "0.9.0",
+  "description": "dsh-utils component: mirror approval requests to QQ as markdown cards with inline keyboard buttons, answering the host approval waterfall from a button click.",
+  "license": "MIT",
+  "author": "xi4z",
+  "homepage": "https://github.com/xi4z/dsh-utils",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xi4z/dsh-utils.git",
+    "directory": "packages/approval-qq"
+  },
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js",
+      "default": "./lib/index.js"
+    },
+    "./locale/*.json": "./locale/*.json",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "locale",
+    "src"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "~3.19.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-agent": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-user-approval": "0.2.2-rc.2",
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

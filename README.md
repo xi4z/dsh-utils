@@ -1,24 +1,25 @@
 # @xi4z/dsh-utils
 
-DeepSeek Harness 的工具 bundle。根包 `@xi4z/dsh-utils` 只做拼装：`cordis.patch.yml` 声明四个挂载行，`locale/{en,zh}.json` 提供 bundle 展示名，`icon.svg` 是图标；组件代码都在独立发布的包里，根包用同版本精确依赖把它们装起来。挂载行 id 同时是 settings 命名空间，插件页按 `@xi4z/dsh-utils#<行 id>` 定位该行的配置页。
+DeepSeek Harness 的工具 bundle。根包 `@xi4z/dsh-utils` 只做拼装：`cordis.patch.yml` 声明五个挂载行，`locale/{en,zh}.json` 提供 bundle 展示名，`icon.svg` 是图标；组件代码都在独立发布的包里，根包用同版本精确依赖把它们装起来。挂载行 id 同时是 settings 命名空间，插件页按 `@xi4z/dsh-utils#<行 id>` 定位该行的配置页。
 
 | 组件 | 行 id | 包 | 作用 |
 |---|---|---|---|
 | utils-agents | `utils-agents` | `@xi4z/dsh-utils-utils-agents` | 技能与预设的宿主：嵌套 `SKILL.md` 发现、模型可见性开关，以及按预设管理 skills、技能仓库与 AGENTS.md |
-| 无人值守审批门控 | `dsh-approval-policy` | `@xi4z/dsh-utils-approval-policy` | 给审批请求设应答窗口，超时 fail-closed |
+| 无人值守审批门控 | `dsh-approval-policy` | `@xi4z/dsh-utils-approval-policy` | 给审批请求设应答窗口，超时 fail-closed；对外发布窗口读数 |
+| QQ 审批卡片 | `dsh-approval-qq` | `@xi4z/dsh-utils-approval-qq` | 把待审批请求推成 QQ 卡片（markdown + 允许／拒绝按钮），按钮点击回填审批结论 |
 | 会话通知 | `dsh-notify` | `@xi4z/dsh-utils-notify` | 会话结束 / 等授权 / 等回答时经 Gotify 网关推送，带设备名 |
-| 浏览器界面 | `utils-ui` | `@xi4z/dsh-utils-ui` | 三个宿主行的配置页 + 右侧栏 utils-agents 面板；宿主侧只有空 `apply()` |
+| 浏览器界面 | `utils-ui` | `@xi4z/dsh-utils-ui` | 四个宿主行的配置页 + 右侧栏 utils-agents 面板；宿主侧只有空 `apply()` |
 
 ## 安装
 
-装一次 bundle 即可；四个组件由 pnpm 作为根包的精确版本依赖从 registry 装上。
+装一次 bundle 即可；五个组件由 pnpm 作为根包的精确版本依赖从 registry 装上。
 
 | 想要的 | `target` |
 |---|---|
 | 最近一次发布 | `@xi4z/dsh-utils` |
 | `main` 最新提交 | `https://github.com/xi4z/dsh-utils`（组件包仍需 registry 上有同版本） |
-| 离线 | 五个 tarball（见下） |
-| 改代码、即时生效 | 目录 `link:`，profile 里同时 link 四个组件 |
+| 离线 | 六个 tarball（见下） |
+| 改代码、即时生效 | 目录 `link:`，profile 里同时 link 五个组件 |
 
 ```
 plugin_manager action=install_bundle target=@xi4z/dsh-utils
@@ -28,24 +29,25 @@ plugin_manager action=install_bundle target=@xi4z/dsh-utils
 dsh plugin --profile <profile> add @xi4z/dsh-utils
 ```
 
-根包的 `dependencies` 固定到四个 `@xi4z/dsh-utils-*`，版本与 bundle 相同，所以发布版只需要这一个 spec。GitHub 地址装的是 `main` 当前状态、不钉版本；要钉就用 npm 名或 `#<commit>`（组件仍从 registry 取同版本）。
+根包的 `dependencies` 固定到五个 `@xi4z/dsh-utils-*`，版本与 bundle 相同，所以发布版只需要这一个 spec。GitHub 地址装的是 `main` 当前状态、不钉版本；要钉就用 npm 名或 `#<commit>`（组件仍从 registry 取同版本）。
 
-根包 tarball 只含拼装层，组件在各自的包里。离线搬运要把五个包都 pack：
+根包 tarball 只含拼装层，组件在各自的包里。离线搬运要把六个包都 pack：
 
 ```sh
 pnpm install && pnpm build
 pnpm -r --filter "./packages/*" pack --pack-destination dist
 pnpm pack --pack-destination dist
-# 目标机器 profile 里五个 tarball 都加 file: 依赖，再装 bundle
+# 目标机器 profile 里六个 tarball 都加 file: 依赖，再装 bundle
 ```
 
-本地开发装目录（`link:`，不复制文件，改完 `pnpm build` 重启宿主）。组件是精确版本依赖，profile 要把四个组件也 link 进来，pnpm 才会用本地目录而不是去 registry 解析：
+本地开发装目录（`link:`，不复制文件，改完 `pnpm build` 重启宿主）。组件是精确版本依赖，profile 要把五个组件也 link 进来，pnpm 才会用本地目录而不是去 registry 解析：
 
 ```json
 {
   "dependencies": {
     "@xi4z/dsh-utils": "link:/abs/path/dsh-utils",
     "@xi4z/dsh-utils-approval-policy": "link:/abs/path/dsh-utils/packages/approval-policy",
+    "@xi4z/dsh-utils-approval-qq": "link:/abs/path/dsh-utils/packages/approval-qq",
     "@xi4z/dsh-utils-notify": "link:/abs/path/dsh-utils/packages/notify",
     "@xi4z/dsh-utils-utils-agents": "link:/abs/path/dsh-utils/packages/utils-agents",
     "@xi4z/dsh-utils-ui": "link:/abs/path/dsh-utils/packages/ui"
@@ -53,7 +55,7 @@ pnpm pack --pack-destination dist
 }
 ```
 
-profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 patch 自动插四行，不手写挂载块；`config:` 只管配置。挂载项新增/改名要重启宿主。
+profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 patch 自动插五行，不手写挂载块；`config:` 只管配置。挂载项新增/改名要重启宿主。
 
 ## 配置覆盖
 
@@ -70,8 +72,9 @@ profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 p
     windowSeconds: 300
 - id: dsh-notify
   config:
-    gotifyUrl: '${DSH_GOTIFY_URL}'
-    gotifyToken: '${DSH_GOTIFY_TOKEN}'
+    gotifyUrl: 'https://notify.example.com'
+    # 只写密钥：显式填写，设置页可改但永不回显；不做环境变量插值
+    gotifyToken: 'gtfya.该系列的token'
     dryRun: false
 ```
 
@@ -79,17 +82,17 @@ profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 p
 
 ## 发布
 
-五个包同版本、按依赖顺序发布：四个组件在前，bundle 在后。`scripts/release.mjs` 先 `npm view` 探一遍，版本已在 registry 上就跳过（重复跑安全、失败可续）；任一包版本与根包不一致会直接报错退出。
+六个包同版本、按依赖顺序发布：五个组件在前，bundle 在后。`scripts/release.mjs` 先 `npm view` 探一遍，版本已在 registry 上就跳过（重复跑安全、失败可续）；任一包版本与根包不一致会直接报错退出。
 
 推 GitHub 与发 npm 合成一次操作——打 tag 触发 [`publish.yml`](.github/workflows/publish.yml)：
 
 ```sh
 git push                                                   # 先推代码
 git tag v$(node -p "require('./package.json').version")     # 打 tag：版本号取根包 version
-git push origin --follow-tags                              # 再推 tag，CI 里 build + 发布全部五个包
+git push origin --follow-tags                              # 再推 tag，CI 里 build + 发布全部六个包
 ```
 
-tag 必须等于根包 `package.json` 的版本，否则 job 直接失败。CI 里 `pnpm release` 按依赖顺序发五个包，带 `--provenance`。
+tag 必须等于根包 `package.json` 的版本，否则 job 直接失败。CI 里 `pnpm release` 按依赖顺序发六个包，带 `--provenance`。
 
 一次性准备：npm 建一个 Automation token，存成仓库 secret `NPM_TOKEN`。scope 是公开的 `@xi4z`，token 所属账号要能用这个 scope（scope 通常是 npm 用户名或已创建的组织）。
 
@@ -101,7 +104,7 @@ pnpm release             # 按顺序发组件与 bundle；已发布版本跳过
 pnpm release --dry-run   # 只看会不会发，不动 registry
 ```
 
-改了任何组件都要把五个 `package.json` 的版本一起提到同一个值，再打 tag。
+改了任何组件都要把六个 `package.json` 的版本一起提到同一个值，再打 tag。
 
 ## 组件一：utils-agents
 
@@ -346,7 +349,87 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
 
 判定粒度：`sessions` 命中与 `all` 是会话级。`subagent` 看 `session.header.origin`。`scheduled` / `cron` 看最后一条带溯源 user 消息的 `source.kind`。合成注入（`runtime-context`、`skill-catalog`）跳过；人插过话就不门控。审计由宿主 `approval/asked` + `approval/decided` 写会话日志；本组件不写日志、不落盘。
 
-## 组件三：会话通知
+## 组件三：QQ 审批卡片
+
+把 dsh 的 `approval/request` 桥到 QQ：一个待审批请求，除了网页卡片，还会在 QQ 里出现一张带「允许一次／拒绝」按钮的 markdown 卡片。点按钮即回答审批；不点则按无人值守门控的窗口自动拒绝。
+
+边界很清楚：
+
+| 谁 | 负责 |
+|---|---|
+| 本组件（DSH 内） | 是否镜像、卡片文案、与网页竞速、把按钮点击落回 waterfall |
+| relay（`gotify-qq-relay`） | 发卡、收 `INTERACTION_CREATE`、3 秒内 ack、存点击、点击后发被动回执 |
+| 无人值守门控（`approval-policy`） | 唯一期限：`windowSeconds`。本组件通过 `approvalPolicyInfo` 服务读它，不自己设 TTL |
+
+### 时序
+
+```text
+审批挂起
+  └─ 本组件 prepend 监听 approval/request
+       ├─ 立刻 next()：网页卡片照常弹，门控窗口开始计时
+       ├─ 防抖 sendDelayMs：期间自动裁决/网页抢答 → 不出卡
+       └─ 出卡（正文含「N 秒内未处理将自动拒绝」）
+            ├─ 网页先答 / 门控到期 → POST settle ignored（静默关闭）
+            └─ 点击 → relay ack(0) → 长轮询取到 clicked
+                 → 回填 allowed-once / rejected → POST settle（默认静默，不发回执）
+```
+
+### 配置
+
+| 字段 | 默认 | 含义 |
+|---|---|---|
+| `enabled` | `false` | 总开关；关闭时完全不碰 waterfall |
+| `relayUrl` | `''` | relay 审批基地址，以 `/approval` 结尾，如 `https://notify.xiaz.work/_qq/approval` |
+| `sharedKey` | `''` | 与 relay 的 `approval.key` 一致；**只写密钥**，显式填写，不回显、不插值 |
+| `deviceLabel` | 主机名 | 卡片上的设备名 |
+| `sendDelayMs` | `1200` | 发卡防抖；自动裁决落在此窗口内就不打扰 |
+| `pollWaitSeconds` | `25` | 长轮询窗口；点击到恢复通常 <1s |
+| `timeoutMs` | `10000` | 单次 relay HTTP 超时 |
+| `includeSubagents` | `true` | 是否也镜像子代理会话的审批 |
+| `dryRun` | `false` | 只记日志不发卡 |
+| `allowReceipt` / `denyReceipt` | `''` | 点击后的被动回执文案；**默认空 = 不发回调**，点完只 ack，不推消息 |
+| `translateEnglish` | `true` | 英文审批原因（多见于自动审批升级）先经宿主模型翻成中文再出卡 |
+| `translateTimeoutMs` | `4000` | 翻译预算；超时/失败保留英文原文，不阻塞审批 |
+| `translateProvider` / `translateModel` | `''` | 翻译用的模型路由；留空 = 宿主的 `agentDefaultModel` 当前选择 |
+
+没有 TTL 字段：卡片上的倒计时来自 `approval-policy.windowSeconds`。把门控窗口调大，卡片上的数字会跟着变；`approval-policy` 未安装时没有倒计时，卡片一直有效到被回答或会话中断。
+
+英文原因的处理：自动审批的 `reason` 常常是英文（`Auto review denied tool ...`）。出卡前会做一次纯文本、无工具的一次性模型调用（`ctx.llm`）翻成中文，保留工具名、命令、路径不译；模型不可用、超时或返回不含中文时**保留英文原文**继续出卡。翻译结果按原文缓存（最多 100 条），不会每次重复调用。
+
+### relay 侧
+
+`config.json` 增加一段（键与 DSH 的 `sharedKey` 对齐）：
+
+```json
+{
+  "approval": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8787,
+    "key": "与 sharedKey 相同的共享密钥",
+    "route": "1"
+  }
+}
+```
+
+- `route` 指向发卡的私聊系列（默认 `1`）；审批卡片只支持单聊。
+- relay 会额外连一条 QQ 机器人 WebSocket（只订阅 `INTERACTION`），与现有 Gotify 单向投递并行；同一 shard 只能有一个连接，所以不要再起第二个 relay 实例。
+- 端点：`POST /approval`、`GET /approval/{askId}?wait=N`、`POST /approval/{askId}/settle`、`GET /healthz`；鉴权头 `X-Approval-Key`。
+
+openresty 反代一条受保护路径：
+
+```nginx
+location ^~ /_qq/approval {
+    limit_req zone=qqapproval burst=10 nodelay;
+    proxy_pass http://127.0.0.1:8787;
+    proxy_read_timeout 35s;   # 长轮询 25s + 余量
+    client_max_body_size 8k;
+}
+```
+
+点击后默认**不回任何消息**：relay 只 ack、关单，按钮停止 loading。若显式配了 `allowReceipt` / `denyReceipt`，才用事件被动回复（`event_id = INTERACTION_CREATE:<id>`，不消耗主动消息额度）发一条回执。自动拒绝/网页抢先的卡片静默关闭，之后再点按钮只会被 ack、不会再生效。
+
+## 组件四：会话通知
 
 每轮跑完，或 agent 挂起在「等你回答 / 等你授权」，推一条消息到指定出口。出口默认**公网 Gotify 网关**。插件不持 Bot 凭据、不建 WebSocket、不加依赖，只发一个 HTTP POST。任何能上网的设备（笔记本、服务器、云主机）装同一份 bundle、填网关地址和 token 就能发。每条消息带**发送设备名**（默认主机名），多台机器共用一个 QQ 也能分清。
 
@@ -373,7 +456,7 @@ agent/status   →  running → idle 的边沿 = 整个任务结束
 
 ### 配置
 
-`cordis.patch.yml` 的 `config`，或环境变量。环境变量优先。字段全 volatile：改完即生效，不重启。
+`cordis.patch.yml` 的 `config`，或插件页设置。字段全 volatile：改完即生效，不重启。`gotifyToken` 是**只写密钥**：设置页可以修改，但永不回显，也按字面量使用（不做 `${ENV}` 插值、不读环境变量）。
 
 | 字段 | 环境变量 | 默认 | 说明 |
 |---|---|---|---|
@@ -383,7 +466,7 @@ agent/status   →  running → idle 的边沿 = 整个任务结束
 | `deviceLabel` | `DSH_QQ_NOTIFY_DEVICE_LABEL` | 同 `deviceName` | 给人看的名字，用于 `{device}` 与标题前缀 |
 | `deviceInTitle` | — | `false` | `true` 时 Gotify 标题加 `[设备名]` 前缀 |
 | `gotifyUrl` | `DSH_QQ_NOTIFY_GOTIFY_URL` | `''` | 网关地址，如 `https://notify.example.com` |
-| `gotifyToken` | `DSH_QQ_NOTIFY_GOTIFY_TOKEN` | `''` | 该系列的 Gotify application token |
+| `gotifyToken` | — | `''` | 该系列的 Gotify application token；**只写密钥**，显式填写，不回显、不插值 |
 | `gotifyPriority` | — | `3` | 默认优先级，`targets` 未单独指定时用 |
 | `gotifyHeaders` | `DSH_QQ_NOTIFY_GOTIFY_HEADERS`（JSON） | `{}` | 追加请求头，用于反代 Basic Auth 等 |
 | `targets` | `DSH_QQ_NOTIFY_TARGETS`（JSON） | `[]` | 多目标列表；非空时不用 `gotifyUrl` / `gotifyToken` |
@@ -403,9 +486,11 @@ agent/status   →  running → idle 的边沿 = 整个任务结束
 
 `transport: onebot` 时才读 `endpoint`（默认 `http://127.0.0.1:3000`）、`token`、`targetType`（`private` / `group`）、`targetId`，对应 `DSH_QQ_NOTIFY_URL`、`DSH_QQ_NOTIFY_TOKEN`、`DSH_QQ_NOTIFY_TARGET_TYPE`、`DSH_QQ_NOTIFY_TARGET_ID`。
 
-### 密钥走环境变量
+### 密钥：显式配置、只写不回显
 
-字符串字段支持 `${NAME}` / `${NAME:-默认值}` 插值。范围：`gotifyUrl`、`gotifyToken`、`endpoint`、`token`、`targetId`、`gotifyHeaders` 的值，`targets[]` 的 `url` / `token`。
+`gotifyToken` 声明为 schemastery 的 `role('secret')`：DSH 设置接口在把配置发给浏览器前会剥掉这个字段，只留下「是否已设置」；设置页因此只能覆盖，不能查看。运行时组件仍从 live config 读到真实值，配置写在 profile 的 `cordis.patch.yml` 或插件页里均可，且按字面量使用。
+
+其余字符串字段仍支持 `${NAME}` / `${NAME:-默认值}` 插值：`gotifyUrl`、`endpoint`、`token`、`targetId`、`gotifyHeaders` 的值，`targets[]` 的 `url` / `token`。
 
 变量未设或为空，展开成空串。该目标缺 token 就跳过，记 warning。**不发字面量** `${...}`。插值在每次投递前解析，密钥不进日志。
 
@@ -413,29 +498,31 @@ agent/status   →  running → idle 的边沿 = 整个任务结束
 - id: dsh-notify
   config:
     gotifyUrl: '${DSH_GOTIFY_URL}'
-    gotifyToken: '${DSH_GOTIFY_TOKEN}'
+    gotifyToken: 'gtfya.该系列的token'   # 只写密钥：必须是字面量
     targets:
       - name: qq-home
         urlEnv: DSH_GOTIFY_URL
         tokenEnv: DSH_GOTIFY_TOKEN
 ```
 
-`targets[]` 也支持 `urlEnv` / `tokenEnv`：直接写变量名，优先于字面量字段。整表覆盖的环境变量优先级最高：`DSH_QQ_NOTIFY_GOTIFY_URL`、`DSH_QQ_NOTIFY_GOTIFY_TOKEN`、`DSH_QQ_NOTIFY_TARGETS` 等（见上表）。
+`targets[]` 也支持 `urlEnv` / `tokenEnv`：直接写变量名，优先于字面量字段。对象级的环境覆盖仍可用 `DSH_QQ_NOTIFY_GOTIFY_URL`、`DSH_QQ_NOTIFY_TARGETS` 等；`DSH_QQ_NOTIFY_GOTIFY_TOKEN` 已移除——`gotifyToken` 只认显式字面量。`targets[].token` 位于 JSON 数组内，无法标记 secret，需要保密时用 `tokenEnv`。
 
 ### 多设备：都能发，也能分清是谁
 
 公网网关对任何来源 IP 开放（按 token/IP 限流）。其他设备不用部署 relay，不用 NapCat，不用开本机端口。
 
 1. **设备身份**：`deviceName` 留空自动取 `os.hostname()`。建议设 `deviceLabel`（办公本、家里的服务器），渲染进 `{device}`。
-2. **各自一套 token**：Gotify 里给每台设备建一个 application（一个「系列」）。token 用环境变量注入，别每台共用一把：
+2. **各自一套 token**：Gotify 里给每台设备建一个 application（一个「系列」）。`gotifyToken` 写在每台设备自己的 profile `cordis.patch.yml`（或插件页）里，别每台共用一把：
 
-   ```sh
-   export DSH_QQ_NOTIFY_DEVICE='laptop-01'
-   export DSH_QQ_NOTIFY_DEVICE_LABEL='随身本'
-   export DSH_QQ_NOTIFY_GOTIFY_TOKEN='gtfya.该设备的token'
+   ```yaml
+   - id: dsh-notify
+     config:
+       deviceName: 'laptop-01'
+       deviceLabel: '随身本'
+       gotifyToken: 'gtfya.该设备的token'
    ```
 
-   系列不同，relay 侧就可以把不同系列路由到不同 QQ 收件人。
+   系列不同，relay 侧就可以把不同系列路由到不同 QQ 收件人。需要环境变量时改用 `targets[].tokenEnv`。
 
 3. **一套配置分发多台设备**：用 `targets` + `devices` 让每个目标只对命中设备生效。`devices` 空 = 所有设备都发：
 
@@ -510,30 +597,31 @@ template: |
 
 `deviceInTitle: true` 时标题变「[设备名] 原标题」。`gotifyHeaders` 自定义头合并进请求，但 `X-Gotify-Key` 始终以当前目标 token 为准，自定义头不能覆盖。
 
-## 组件四：utils-ui（浏览器半侧）
+## 组件五：utils-ui（浏览器半侧）
 
-宿主半侧只有一个空 `apply()`，`client.js` 提供全部界面。`packages/ui/package.json` 声明 `dsh.client` 并导出 `./client`；patch 的 `utils-ui` 行挂裸包名，DSH 的客户端扫描器因此把 `client.js` 挂在这一行。三个宿主行不声明 `dsh.client`。
+宿主半侧只有一个空 `apply()`，`client.js` 提供全部界面。`packages/ui/package.json` 声明 `dsh.client` 并导出 `./client`；patch 的 `utils-ui` 行挂裸包名，DSH 的客户端扫描器因此把 `client.js` 挂在这一行。四个宿主行不声明 `dsh.client`。
 
-- 配置页：`plugins.row.config`，key 是 `@xi4z/dsh-utils#<行 id>`；utils-agents 一页含「递归技能发现 / 模型可见性 / 预设与技能仓库」三块，审批与通知各一页。
+- 配置页：`plugins.row.config`，key 是 `@xi4z/dsh-utils#<行 id>`；utils-agents 一页含「递归技能发现 / 模型可见性 / 预设与技能仓库」三块，审批门控、QQ 审批卡片与通知各一页。
 - 右侧栏：`sidebar.right.pane.tab` 的 `utils-agents` 面板，路由全部由 `@xi4z/dsh-utils-utils-agents` 提供。
 - 两套 Deploy Key 的保存/清除、技能仓库配置、版本检查与自动安装都在这个面板里。
 
-停用 `utils-ui` 只失去界面与面板，三个宿主行继续工作。
+停用 `utils-ui` 只失去界面与面板，四个宿主行继续工作。
 
 ## 包结构
 
 ```
 @xi4z/dsh-utils/            只做拼装的 bundle：patch + locale + icon，无组件代码
-├── package.json              dsh.bundle.patch；dependencies = 四个同版本组件
+├── package.json              dsh.bundle.patch；dependencies = 五个同版本组件
 ├── pnpm-workspace.yaml       把 packages/* 串成一个 workspace，本地链接同版本组件
-├── cordis.patch.yml          四行：按裸包名挂四个组件
+├── cordis.patch.yml          五行：按裸包名挂五个组件
 ├── locale/{en,zh}.json       bundle 展示名
 ├── icon.svg
 ├── src/index.ts              空入口
-├── scripts/release.mjs       按依赖顺序发五个包，已发布版本跳过
+├── scripts/release.mjs       按依赖顺序发六个包，已发布版本跳过
 ├── test/layout.test.mjs      布局守卫
-└── packages/                 四个独立发布包
-    ├── approval-policy/      @xi4z/dsh-utils-approval-policy
+└── packages/                 五个独立发布包
+    ├── approval-policy/      @xi4z/dsh-utils-approval-policy   行 dsh-approval-policy
+    ├── approval-qq/          @xi4z/dsh-utils-approval-qq      行 dsh-approval-qq
     ├── notify/               @xi4z/dsh-utils-notify
     ├── utils-agents/         @xi4z/dsh-utils-utils-agents   行 utils-agents
     └── ui/                   @xi4z/dsh-utils-ui             行 utils-ui + client.js
@@ -545,7 +633,7 @@ template: |
 
 ```sh
 pnpm install
-pnpm build     # 根包空入口 + packages/* 四个组件
+pnpm build     # 根包空入口 + packages/* 五个组件
 pnpm test      # 构建 + client.js 语法检查 + 布局守卫 + 各包的 node --test
 ```
 

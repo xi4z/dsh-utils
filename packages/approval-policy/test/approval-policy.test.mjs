@@ -4,6 +4,7 @@ import {
   globToRegExp,
   readFacts,
   shouldGate,
+  describeGate,
   raceGate,
   isAutoReviewAsk,
   recordAutoReviewSettle,
@@ -476,6 +477,29 @@ test('post-execute: only approval rejections are edited; other failures delegate
   })
   assert.equal(delegated, 2)
   assert.deepEqual(success, { kind: 'accept' })
+})
+
+// ------------------------------------------------ approvalPolicyInfo view --
+
+test('describeGate mirrors the gate predicate and window for a human channel', () => {
+  const policy = { origins: ['subagent'], sessions: [], windowSeconds: 60, defaultOutcome: 'rejected' }
+  const sub = describeGate(policy, { id: 'c', session: { header: { origin: 'subagent' } } }, 'child-1')
+  assert.deepEqual(sub, { gated: true, windowMs: 60000, defaultOutcome: 'rejected' })
+
+  const human = describeGate(policy, { id: 'r', session: fakeSession({ messages: [userMsg('user')] }) }, 'root-1')
+  assert.equal(human.gated, false)
+
+  const zero = describeGate({ ...policy, windowSeconds: 0 }, {}, 'x')
+  assert.equal(zero.windowMs, 0)
+})
+
+test('describeGate honours the sessions list and the fail-closed default', () => {
+  const policy = { origins: [], sessions: ['night-*'], windowSeconds: 2.5, defaultOutcome: 'unavailable' }
+  const hit = describeGate(policy, {}, 'night-runner')
+  assert.equal(hit.gated, true)
+  assert.equal(hit.windowMs, 2500)
+  assert.equal(hit.defaultOutcome, 'unavailable')
+  assert.equal(describeGate(policy, {}, 'day-runner').gated, false)
 })
 
 test('post-execute: the 0.2.2-rc.1 message-only rejection is recognized too', async () => {

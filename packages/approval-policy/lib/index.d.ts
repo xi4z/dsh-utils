@@ -82,6 +82,27 @@ export type UnattendedOrigin = 'subagent' | 'scheduled' | 'cron' | 'all';
  * must never grant — fail closed is the whole point.
  */
 export type GatedOutcome = 'rejected' | 'unavailable';
+/**
+ * Read-only view of the gate policy, published on the cordis context so a
+ * human channel (e.g. the QQ approval card) can echo the real deadline instead
+ * of inventing its own TTL. `describe` reuses the exact predicate the gate
+ * applies to the request, so the card and the window can never disagree.
+ */
+export interface ApprovalPolicyInfo {
+    describe(agent: unknown, sessionId: string): {
+        /** Would this request enter the unattended window at all. */
+        gated: boolean;
+        /** Window length in milliseconds; 0 means the gate denies immediately. */
+        windowMs: number;
+        /** What the gate settles with when the window expires. */
+        defaultOutcome: GatedOutcome;
+    };
+}
+declare module '@deepseek-ai/cordis' {
+    interface Context {
+        approvalPolicyInfo: ApprovalPolicyInfo;
+    }
+}
 /** Settings-page schema; each key arrives as a volatile live reference. */
 export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     /** Session/turn origins treated as unattended. Default: subagent + scheduled. */
@@ -214,6 +235,21 @@ export declare function shouldGate(config: {
     readonly origins: readonly UnattendedOrigin[];
     readonly sessions: readonly string[];
 }, sessionId: string, facts: OriginFacts): boolean;
+/**
+ * Describe the policy for one request: the exact predicate the gate will apply
+ * plus the window it will apply it with. Pure, so both the gate and any human
+ * channel can render and enforce the same deadline.
+ */
+export declare function describeGate(config: {
+    readonly origins: readonly UnattendedOrigin[];
+    readonly sessions: readonly string[];
+    readonly windowSeconds: number;
+    readonly defaultOutcome: GatedOutcome;
+}, agent: AgentLike | undefined, sessionId: string): {
+    gated: boolean;
+    windowMs: number;
+    defaultOutcome: GatedOutcome;
+};
 /** Which side of the race produced the settled outcome. */
 export type GateSettledBy = 'downstream' | 'window';
 /** One gate result: the outcome plus the side that produced it. */
