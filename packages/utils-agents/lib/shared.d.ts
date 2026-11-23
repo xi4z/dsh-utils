@@ -96,6 +96,25 @@ export declare function sharedPresetView(ctx: Context, options: Options, preset:
  * @returns per-preset results plus the refreshed view.
  */
 export declare function syncSharedPresets(ctx: Context, options: Options, preset: PresetInfo | null, body: Record<string, unknown>): Promise<SharedSyncPayload>;
+/** Payload of one automatic preset pass. */
+export interface AutoPresetSyncPayload extends SharedSyncPayload {
+    /** Preset ids whose local copy was removed because the repository dropped them. */
+    readonly removed: string[];
+}
+/**
+ * Mirror the presets carried by the configured Skill repositories into the
+ * preset home.
+ *
+ * The repository is the only source of truth: new and outdated presets are
+ * copied, and a preset the repository no longer carries is removed locally when
+ * an earlier pass synced it (the manifest records that ownership). Built-in
+ * presets and presets that only ever existed locally are never touched, and a
+ * checkout that is missing or unreadable never triggers a removal.
+ * @param ctx - host context.
+ * @param options - normalized settings.
+ * @returns per-preset results, removed ids, and the refreshed view.
+ */
+export declare function autoSyncSharedPresets(ctx: Context, options: Options): Promise<AutoPresetSyncPayload>;
 /** The storage path of the shared-preset manifest. */
 export declare function sharedManifestPath(): string;
 /** Normalize one preset directory name into a safe id, or null. */

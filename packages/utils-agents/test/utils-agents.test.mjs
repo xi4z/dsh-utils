@@ -6,7 +6,10 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { promisify } from 'node:util'
 import { Config, apply, inject, name, ROUTE_PATHS } from '../lib/index.js'
+import { updateSkillRepositories } from '../lib/global-repo.js'
+import { autoSyncSharedPresets, sharedManifestPath } from '../lib/shared.js'
 import { createUpdateChecker, installCommand, parseGitSpec } from '../lib/update.js'
+import { normalizeOptions } from '../lib/util.js'
 
 const runFile = promisify(execFile)
 const GIT_ENV = {
@@ -520,7 +523,7 @@ test('lists and syncs .dsh presets carried by a skill repository', async (t) => 
   // A bare ".dsh/<id>" directory is accepted when it looks like a preset.
   await createSharedRepo(repo, ['plain'], ['.dsh'])
   // The legacy global repository clone target is scanned even when nested.
-  const nested = await createSharedRepo(join(home, 'skills', 'herskill'), ['nested'])
+  const nested = await createSharedRepo(join(home, 'skills', 'utils-skill'), ['nested'])
   // ".dsh/preset/" may itself be one preset; its id comes from preset.yml.
   const single = join(home, 'skills', 'single', '.dsh', 'preset')
   await mkdir(join(single, 'skills', 'one'), { recursive: true })
@@ -679,7 +682,7 @@ test('reads and saves the shared skill repository settings and deploy key', asyn
   assert.equal(initial.response.status, 200, JSON.stringify(initial.body))
   assert.equal(initial.body.state.repoUrl, 'https://github.com/xi4z/skills')
   assert.equal(initial.body.state.branch, 'Agent')
-  assert.equal(initial.body.state.targetDir, join(home, 'skills', 'herskill'))
+  assert.equal(initial.body.state.targetDir, join(home, 'skills', 'utils-skill'))
   assert.equal(initial.body.key.source, 'none')
 
   const target = join(home, 'shared-checkout')
@@ -709,6 +712,203 @@ test('reads and saves the shared skill repository settings and deploy key', asyn
   const cleared = await call(connection, ROUTE_PATHS.sharedKey, { method: 'POST', body: { key: '' } })
   assert.equal(cleared.response.status, 200)
   assert.equal(cleared.body.key.source, 'none')
+})
+
+test('stores the shared repository settings in utils/utils.json', async (t) => {
+  const { connection, home } = await setup(t)
+  const target = join(home, 'shared-checkout')
+  const saved = await call(connection, ROUTE_PATHS.sharedRepo, {
+    method: 'POST',
+    body: { repoUrl: 'file:///tmp/skills.git', branch: 'main', targetDir: target, recurseSubmodules: false },
+  })
+  assert.equal(saved.response.status, 200, JSON.stringify(saved.body))
+
+  const document = JSON.parse(await readFile(join(home, 'utils', 'utils.json'), 'utf8'))
+  assert.equal(document.version, 1)
+  assert.equal(document.skillRepositories.length, 1)
+  assert.equal(document.skillRepositories[0].repoUrl, 'file:///tmp/skills.git')
+  assert.equal(document.skillRepositories[0].targetDir, target)
+  assert.equal(document.skillRepositories[0].recurseSubmodules, false)
+  assert.equal(document.autoUpdate, true)
+  assert.equal(document.autoSyncPresets, true)
+  assert.equal(document.updateIntervalMinutes, 60)
+
+  // The panel keeps reading the same document on the next request.
+  const again = await call(connection, ROUTE_PATHS.sharedRepo)
+  assert.equal(again.body.state.targetDir, target)
+})
+
+test('refreshes configured Skill repositories and their submodules', async (t) => {
+  const { connection, root, home, ctx } = await setup(t)
+  const savedProtocol = process.env.GIT_ALLOW_PROTOCOL
+  process.env.GIT_ALLOW_PROTOCOL = 'file'
+  t.after(() => {
+    if (savedProtocol === undefined) delete process.env.GIT_ALLOW_PROTOCOL
+    else process.env.GIT_ALLOW_PROTOCOL = savedProtocol
+  })
+
+  const subOrigin = join(root, 'sub-origin')
+  await mkdir(join(subOrigin, 'bundle'), { recursive: true })
+  await writeFile(join(subOrigin, 'bundle', 'SKILL.md'), '---\nname: sub-skill\ndescription: sub skill\n---\n\n# sub\n')
+  await git(['init', '--quiet', '--initial-branch=main'], subOrigin)
+  await git(['add', '--all'], subOrigin)
+  await git(['commit', '--quiet', '-m', 'sub initial'], subOrigin)
+
+  const superOrigin = join(root, 'super-origin')
+  await mkdir(superOrigin, { recursive: true })
+  await writeFile(join(superOrigin, 'SKILL.md'), '---\nname: root-skill\ndescription: root skill\n---\n\n# root\n')
+  await git(['init', '--quiet', '--initial-branch=main'], superOrigin)
+  await git(['-c', 'protocol.file.allow=always', 'submodule', 'add', 'file://' + subOrigin, 'vendor/skills'], superOrigin)
+  await git(['add', '--all'], superOrigin)
+  await git(['commit', '--quiet', '-m', 'super initial'], superOrigin)
+
+  const target = join(home, 'skills-checkout')
+  const saved = await call(connection, ROUTE_PATHS.sharedRepo, {
+    method: 'POST',
+    body: { repoUrl: 'file://' + superOrigin, branch: 'main', targetDir: target, recurseSubmodules: true },
+  })
+  assert.equal(saved.response.status, 200, JSON.stringify(saved.body))
+
+  const first = await updateSkillRepositories(ctx)
+  assert.equal(first.length, 1)
+  assert.equal(first[0].ok, true, JSON.stringify(first[0]))
+  assert.equal(first[0].changed, true)
+  assert.equal(first[0].skipped, false)
+  assert.equal(await readFile(join(target, 'SKILL.md'), 'utf8').then(() => true), true)
+  assert.equal(await readFile(join(target, 'vendor', 'skills', 'bundle', 'SKILL.md'), 'utf8').then(() => true), true, 'the submodule is initialized')
+
+  const second = await updateSkillRepositories(ctx)
+  assert.equal(second[0].ok, true)
+  assert.equal(second[0].changed, false)
+  assert.match(second[0].message, /最新/)
+})
+
+test('auto-syncs presets carried by the configured repository', async (t) => {
+  const { connection, root, home, ctx } = await setup(t)
+  const origin = await createSharedGitRepo(join(root, 'auto-origin'), ['team'])
+  const target = join(home, 'auto-checkout')
+  await call(connection, ROUTE_PATHS.sharedRepo, {
+    method: 'POST',
+    body: { repoUrl: 'file://' + origin, branch: 'main', targetDir: target, recurseSubmodules: false },
+  })
+  const pulled = await call(connection, ROUTE_PATHS.sharedPull, { method: 'POST', body: {} })
+  assert.equal(pulled.response.status, 200, JSON.stringify(pulled.body))
+
+  const options = normalizeOptions({})
+  const first = await autoSyncSharedPresets(ctx, options)
+  assert.deepEqual(first.results.map((row) => [row.id, row.status]), [['team', 'new']])
+  assert.equal(first.results[0].written > 0, true)
+  assert.equal(await readFile(join(home, '.agent-presets', 'team', 'AGENTS.md'), 'utf8'), '# team shared\n')
+  assert.equal(await readFile(join(home, '.agent-presets', 'team', 'preset.yml'), 'utf8').then(() => true), true)
+
+  const second = await autoSyncSharedPresets(ctx, options)
+  assert.deepEqual(second.results, [], 'an up-to-date preset is not rewritten')
+
+  await writeFile(join(home, '.agent-presets', 'team', 'local.md'), '# local\n')
+  await writeFile(join(origin, '.dsh', 'preset', 'team', 'AGENTS.md'), '# team changed\n')
+  await git(['add', '--all'], origin)
+  await git(['commit', '--quiet', '-m', 'update'], origin)
+  const again = await call(connection, ROUTE_PATHS.sharedPull, { method: 'POST', body: {} })
+  assert.equal(again.response.status, 200, JSON.stringify(again.body))
+
+  const third = await autoSyncSharedPresets(ctx, options)
+  assert.deepEqual(third.results.map((row) => [row.id, row.status]), [['team', 'update']])
+  assert.equal(await readFile(join(home, '.agent-presets', 'team', 'AGENTS.md'), 'utf8'), '# team changed\n')
+  assert.equal(await readFile(join(home, '.agent-presets', 'team', 'local.md'), 'utf8'), '# local\n', 'local-only files are kept')
+})
+
+test('auto-syncs presets from every configured repository', async (t) => {
+  const { root, home, ctx } = await setup(t)
+  const first = await createSharedRepo(join(root, 'repo-one'), ['alpha-one'])
+  const second = await createSharedRepo(join(root, 'repo-two'), ['beta-two'])
+  await mkdir(join(home, 'utils'), { recursive: true })
+  await writeFile(join(home, 'utils', 'utils.json'), JSON.stringify({
+    version: 1,
+    skillRepositories: [
+      { repoUrl: 'file://' + first, branch: 'main', targetDir: first, keyPath: '', recurseSubmodules: false, lastSync: null },
+      { repoUrl: 'file://' + second, branch: 'main', targetDir: second, keyPath: '', recurseSubmodules: false, lastSync: null },
+    ],
+  }))
+
+  const payload = await autoSyncSharedPresets(ctx, normalizeOptions({}))
+  assert.deepEqual(payload.results.map((row) => [row.id, row.status]).sort(), [['alpha-one', 'new'], ['beta-two', 'new']])
+  assert.equal(await readFile(join(home, '.agent-presets', 'alpha-one', 'AGENTS.md'), 'utf8'), '# alpha-one shared\n')
+  assert.equal(await readFile(join(home, '.agent-presets', 'beta-two', 'AGENTS.md'), 'utf8'), '# beta-two shared\n')
+})
+
+test('mirrors the repository as the only source of truth for presets', async (t) => {
+  const { connection, root, home, ctx } = await setup(t)
+  const origin = await createSharedGitRepo(join(root, 'authoritative-origin'), ['team', 'gone'])
+  // A preset named like a shipped one is never synced.
+  await createSharedRepo(origin, ['standard'])
+  await git(['add', '--all'], origin)
+  await git(['commit', '--quiet', '-m', 'standard'], origin)
+
+  const target = join(home, 'authoritative-checkout')
+  const saved = await call(connection, ROUTE_PATHS.sharedRepo, {
+    method: 'POST',
+    body: { repoUrl: 'file://' + origin, branch: 'main', targetDir: target, recurseSubmodules: false },
+  })
+  assert.equal(saved.response.status, 200, JSON.stringify(saved.body))
+  const pulled = await call(connection, ROUTE_PATHS.sharedPull, { method: 'POST', body: {} })
+  assert.equal(pulled.response.status, 200, JSON.stringify(pulled.body))
+
+  const options = normalizeOptions({})
+  const first = await autoSyncSharedPresets(ctx, options)
+  assert.deepEqual(first.results.map((row) => [row.id, row.status]).sort(), [['gone', 'new'], ['team', 'new']])
+  assert.deepEqual(first.removed, [])
+  assert.equal(await readFile(join(home, '.agent-presets', 'standard', 'AGENTS.md'), 'utf8').then(() => true, () => false), false, 'a shipped preset is never synced')
+
+  // A preset that is already identical is adopted into the manifest, so a
+  // later repository deletion still reaches it.
+  await rm(sharedManifestPath(), { force: true })
+  const adopted = await autoSyncSharedPresets(ctx, options)
+  assert.deepEqual(adopted.results, [])
+  assert.deepEqual(adopted.removed, [])
+  const manifest = JSON.parse(await readFile(sharedManifestPath(), 'utf8'))
+  assert.equal(manifest.presets.team !== undefined, true)
+  assert.equal(manifest.presets.gone !== undefined, true)
+
+  // A local-only preset is never removed.
+  await mkdir(join(home, '.agent-presets', 'mine'), { recursive: true })
+  await writeFile(join(home, '.agent-presets', 'mine', 'AGENTS.md'), '# mine\n')
+
+  // Deleting the preset in the repository removes the local copy.
+  await rm(join(origin, '.dsh', 'preset', 'gone'), { recursive: true, force: true })
+  await git(['add', '--all'], origin)
+  await git(['commit', '--quiet', '-m', 'drop gone'], origin)
+  const again = await call(connection, ROUTE_PATHS.sharedPull, { method: 'POST', body: {} })
+  assert.equal(again.response.status, 200, JSON.stringify(again.body))
+
+  const second = await autoSyncSharedPresets(ctx, options)
+  assert.deepEqual(second.removed, ['gone'])
+  assert.equal(await readFile(join(home, '.agent-presets', 'gone', 'AGENTS.md'), 'utf8').then(() => true, () => false), false)
+  assert.equal(await readFile(join(home, '.agent-presets', 'team', 'AGENTS.md'), 'utf8'), '# team shared\n')
+  assert.equal(await readFile(join(home, '.agent-presets', 'mine', 'AGENTS.md'), 'utf8'), '# mine\n', 'a local-only preset is never removed')
+})
+
+test('the periodic refresh never merges over local changes', async (t) => {
+  const { connection, root, home, ctx } = await setup(t)
+  const origin = await createSharedGitRepo(join(root, 'dirty-origin'), ['team'])
+  const target = join(home, 'dirty-checkout')
+  await call(connection, ROUTE_PATHS.sharedRepo, {
+    method: 'POST',
+    body: { repoUrl: 'file://' + origin, branch: 'main', targetDir: target, recurseSubmodules: false },
+  })
+  const cloned = await updateSkillRepositories(ctx)
+  assert.equal(cloned[0].ok, true, JSON.stringify(cloned[0]))
+
+  await writeFile(join(target, 'local-note.md'), '# local work\n')
+  const before = await git(['-C', target, 'rev-parse', 'HEAD'])
+  await writeFile(join(origin, '.dsh', 'preset', 'team', 'AGENTS.md'), '# upstream\n')
+  await git(['add', '--all'], origin)
+  await git(['commit', '--quiet', '-m', 'update'], origin)
+
+  const results = await updateSkillRepositories(ctx)
+  assert.equal(results[0].ok, true)
+  assert.equal(results[0].skipped, true)
+  assert.match(results[0].message, /本地改动/)
+  assert.equal(await git(['-C', target, 'rev-parse', 'HEAD']), before, 'the checkout is untouched')
 })
 
 test('pulls the shared skill repository and exposes its .dsh/preset', async (t) => {
@@ -759,6 +959,10 @@ test('scans the global skill repository configured by the legacy route', async (
   assert.ok(source, 'legacy global repository target is scanned')
   assert.equal(source.path, target)
   assert.deepEqual(source.presets.map((preset) => preset.id), ['global-demo'])
+
+  const migrated = JSON.parse(await readFile(join(home, 'utils', 'utils.json'), 'utf8'))
+  assert.equal(migrated.skillRepositories.length, 1)
+  assert.equal(migrated.skillRepositories[0].targetDir, target)
 })
 
 test('shared sync detects updates and only prunes repository-owned files', async (t) => {

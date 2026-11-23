@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict'
 import { after, test } from 'node:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { applySkillDiscovery } from '../lib/skill-discovery.js'
+
+// Keep the tests off the real profile: the provider reads configured Skill
+// repositories from $DSH_HOME/utils/utils.json.
+const profileRoot = await mkdtemp(join(tmpdir(), 'dsh-utils-home-'))
+const dshHomeDir = join(profileRoot, '.dsh')
+process.env.DSH_HOME = dshHomeDir
+process.env.DSH_AGENTS_HOME = join(profileRoot, '.agents')
 
 // ---------------------------------------------------------------- helpers --
 
@@ -17,6 +24,7 @@ async function makeRoot() {
 
 after(async () => {
   for (const dir of roots) await rm(dir, { recursive: true, force: true })
+  await rm(profileRoot, { recursive: true, force: true })
 })
 
 function skillMd(skillName, description, extra = '', body = '') {
@@ -86,10 +94,30 @@ function rootConfig(root, overrides = {}) {
   return {
     includeProjectRoots: false,
     includeUserRoots: false,
+    includeSkillRepositories: false,
     watch: false,
     extraRoots: [root],
     ...overrides,
   }
+}
+
+/** Write \(a\) configured Skill repository into the isolated profile. */
+async function configureSkillRepository(t, targetDir, overrides = {}) {
+  const dir = join(dshHomeDir, 'utils')
+  await mkdir(dir, { recursive: true })
+  const file = join(dir, 'utils.json')
+  await writeFile(file, JSON.stringify({
+    version: 1,
+    skillRepositories: [{
+      repoUrl: 'file://' + targetDir,
+      branch: 'main',
+      targetDir,
+      keyPath: '',
+      recurseSubmodules: false,
+      ...overrides,
+    }],
+  }), 'utf8')
+  t.after(() => rm(file, { force: true }))
 }
 
 // ------------------------------------------------------------- module shape --
@@ -145,6 +173,44 @@ test('maxDepth bounds the walk', async () => {
   const candidates = await provider.list({})
 
   assert.deepEqual(candidates.map((candidate) => candidate.name), ['reachable'])
+})
+
+test('a configured Skill repository is scanned from its own root', async (t) => {
+  const repository = await makeRoot()
+  await writeSkill(repository, [], skillMd('repo-root', 'A skill at the repository root.'))
+  await writeSkill(repository, ['nested', 'bundle'], skillMd('repo-nested', 'A nested repository skill.'))
+  await configureSkillRepository(t, repository)
+
+  const { provider } = mount({ includeProjectRoots: false, includeUserRoots: false, watch: false })
+  const candidates = await provider.list({})
+
+  assert.deepEqual(candidates.map((candidate) => candidate.name).sort(), ['repo-nested', 'repo-root'])
+  const root = candidates.find((candidate) => candidate.name === 'repo-root')
+  assert.equal(root.rank, 90, 'the configured checkout outranks inferred roots')
+  assert.equal(root.source, 'custom')
+})
+
+test('includeSkillRepositories false leaves the configured checkout out', async (t) => {
+  const repository = await makeRoot()
+  await writeSkill(repository, [], skillMd('repo-root', 'A skill at the repository root.'))
+  await configureSkillRepository(t, repository)
+
+  const { provider } = mount({ includeProjectRoots: false, includeUserRoots: false, includeSkillRepositories: false, watch: false })
+  assert.deepEqual(await provider.list({}), [])
+})
+
+test('a checkout reachable through a symlinked root is contributed once', async (t) => {
+  const repository = await makeRoot()
+  await writeSkill(repository, ['bundle'], skillMd('only-skill', 'One skill, two roots.'))
+  await configureSkillRepository(t, repository)
+  const link = join(dshHomeDir, 'skills-link-' + Math.random().toString(36).slice(2))
+  await symlink(repository, link, 'dir')
+
+  const { provider } = mount({ includeProjectRoots: false, includeUserRoots: false, watch: false, extraRoots: [link] })
+  const candidates = await provider.list({})
+
+  assert.deepEqual(candidates.map((candidate) => candidate.name), ['only-skill'])
+  assert.equal(candidates[0].rank, 90, 'the configured root wins the duplicate')
 })
 
 test('ignoreDirs are never descended into', async () => {

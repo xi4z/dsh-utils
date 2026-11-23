@@ -2,52 +2,37 @@
  * Shared skill repository support for the utils-agents panel.
  *
  * The repository configured here is the tracked skills checkout: the panel
- * clones or fast-forwards it with an optional Deploy Key, and the shared
- * preset scanner reads ".dsh/preset" from that checkout. When the shared
- * repository has no key path and no key of its own, the panel-wide Deploy Key
- * from git.js is used, so a private skills checkout pulls without extra setup.
- * Settings and the pasted key intentionally keep the storage the former global
- * repository route used ($DSH_HOME/storages/dsh-utils-ui.json and
- * dsh-utils-ui.deploy-key), so an upgraded profile keeps its repository and key.
+ * clones or fast-forwards it with an optional Deploy Key, the shared preset
+ * scanner reads ".dsh/preset" from that checkout, and Skill discovery scans it
+ * recursively from its own root. When the shared repository has no key path
+ * and no key of its own, the panel-wide Deploy Key from git.js is used, so a
+ * private skills checkout pulls without extra setup.
+ *
+ * Settings live in the consolidated document
+ * `$DSH_HOME/utils/utils.json` (see utils-config.ts); the old
+ * `storages/dsh-utils-ui.json` document is migrated on first read. The pasted
+ * key intentionally keeps its former path (`dsh-utils-ui.deploy-key`), so an
+ * upgraded profile keeps its repository and key.
+ *
+ * A timer (skill-repo-updater.ts) calls {@link updateSkillRepositories}: it
+ * fast-forwards every configured checkout and refreshes its submodules, but
+ * never merges over a dirty working tree and never resets or pushes.
  *
  * @module dsh-utils/utils-agents/global-repo
  */
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { canonicalRepoUrl, cloneUrlFor, globalKeyPath, runGit, validateBranch, validateRepoUrl, } from './git.js';
 import { IGNORED_DIRS, AgentsError, directoryOf, dshHome, errorMessage, exists, expandAbsolute, walkFiles, } from './util.js';
-/** Legacy state file name; the old global route reads the same document. */
-const STATE_FILE_NAME = 'dsh-utils-ui.json';
+import { defaultSkillRepository, readUtilsConfig, writeUtilsConfig, } from './utils-config.js';
 /** Legacy deploy-key file name; never returned to the browser. */
 const KEY_FILE_NAME = 'dsh-utils-ui.deploy-key';
-/** Depth used when counting skills in the shared checkout. */
+/** Depth used when counting skills in a shared checkout. */
 const SKILL_SCAN_DEPTH = 8;
 /** Read the shared repository settings, filling defaults. */
 export async function readSharedRepoState(options) {
-    const fallback = {
-        repoUrl: options.defaultRepoUrl,
-        branch: options.defaultBranch,
-        targetDir: join(dshHome(), 'skills', 'herskill'),
-        keyPath: '',
-        recurseSubmodules: true,
-        lastSync: null,
-    };
-    let raw = null;
-    try {
-        raw = JSON.parse(await readFile(sharedRepoStatePath(), 'utf8'));
-    }
-    catch {
-        return fallback;
-    }
-    const record = raw !== null && typeof raw === 'object' ? raw : {};
-    return {
-        repoUrl: textValue(record.repoUrl, fallback.repoUrl),
-        branch: textValue(record.branch, fallback.branch),
-        targetDir: absoluteValue(record.targetDir, fallback.targetDir),
-        keyPath: typeof record.keyPath === 'string' ? record.keyPath : '',
-        recurseSubmodules: record.recurseSubmodules !== false,
-        lastSync: normalizeSync(record.lastSync),
-    };
+    const { config } = await readUtilsConfig();
+    return config.skillRepositories[0] ?? defaultSkillRepository(options);
 }
 /** Read the shared repository settings plus checkout and key status. */
 export async function sharedRepoView(ctx, options) {
@@ -82,14 +67,17 @@ export async function saveSharedRepoConfig(ctx, options, body) {
             throw new AgentsError('密钥路径不合法：' + keyPath, 400);
         }
     }
-    await writeSharedRepoState({
+    const saved = {
         repoUrl,
         branch,
         targetDir: resolvedTarget,
         keyPath,
         recurseSubmodules,
         lastSync: current.lastSync,
-    });
+    };
+    const { config } = await readUtilsConfig();
+    config.skillRepositories = [saved, ...config.skillRepositories.slice(1)];
+    await writeUtilsConfig(config);
     return sharedRepoView(ctx, options);
 }
 /** Store a pasted Deploy Key; an empty string clears it. */
@@ -101,7 +89,7 @@ export async function saveSharedRepoKey(ctx, options, key) {
     }
     if (key.includes(String.fromCharCode(0)))
         throw new AgentsError('Deploy Key 不能包含 NUL 字符', 400);
-    await mkdir(join(dshHome(), 'storages'), { recursive: true, mode: 0o700 });
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
     const temp = file + '.' + randomSuffix() + '.tmp';
     try {
         await writeFile(temp, key.trimEnd() + '\n', { mode: 0o600, flag: 'wx' });
@@ -116,7 +104,106 @@ export async function saveSharedRepoKey(ctx, options, key) {
 }
 /** Clone or fast-forward the shared repository with the configured key. */
 export async function pullSharedRepo(ctx, options) {
-    const state = await readSharedRepoState(options);
+    const snapshot = await readUtilsConfig();
+    const current = snapshot.config.skillRepositories[0] ?? defaultSkillRepository(options);
+    const synced = await syncRepository(ctx, current, { skipDirty: false });
+    const next = {
+        ...current,
+        lastSync: {
+            at: new Date().toISOString(),
+            ok: true,
+            commit: synced.target.commit ?? '',
+            skills: synced.target.skills,
+            message: synced.message,
+        },
+    };
+    const repositories = snapshot.config.skillRepositories.length > 0
+        ? [next, ...snapshot.config.skillRepositories.slice(1)]
+        : [next];
+    await writeUtilsConfig({ ...snapshot.config, skillRepositories: repositories });
+    return { state: next, target: synced.target, key: await sharedKeyStatus(next) };
+}
+/**
+ * Refresh every configured Skill repository and its submodules.
+ *
+ * This is the timer's entry point: best-effort per repository, never over a
+ * dirty working tree, and failures are reported instead of thrown.
+ * @param ctx - plugin context for warnings.
+ * @returns one result per configured repository.
+ */
+export async function updateSkillRepositories(ctx) {
+    const snapshot = await readUtilsConfig();
+    const { skillRepositories } = snapshot.config;
+    if (skillRepositories.length === 0)
+        return [];
+    const results = [];
+    let dirty = false;
+    for (let index = 0; index < skillRepositories.length; index += 1) {
+        const repository = skillRepositories[index];
+        try {
+            const synced = await syncRepository(ctx, repository, { skipDirty: true });
+            if (synced.skipped) {
+                results.push({
+                    targetDir: repository.targetDir,
+                    repoUrl: repository.repoUrl,
+                    ok: true,
+                    changed: false,
+                    skipped: true,
+                    message: synced.message,
+                });
+                continue;
+            }
+            skillRepositories[index] = {
+                ...repository,
+                lastSync: {
+                    at: new Date().toISOString(),
+                    ok: true,
+                    commit: synced.target.commit ?? '',
+                    skills: synced.target.skills,
+                    message: synced.message,
+                },
+            };
+            dirty = true;
+            results.push({
+                targetDir: repository.targetDir,
+                repoUrl: repository.repoUrl,
+                ok: true,
+                changed: synced.changed,
+                skipped: false,
+                message: synced.message,
+            });
+        }
+        catch (error) {
+            const message = errorMessage(error);
+            ctx.logger.warn('utils-agents: skill repository update failed for ' + repository.targetDir + ': ' + message);
+            results.push({
+                targetDir: repository.targetDir,
+                repoUrl: repository.repoUrl,
+                ok: false,
+                changed: false,
+                skipped: false,
+                message,
+            });
+        }
+    }
+    if (dirty) {
+        try {
+            await writeUtilsConfig(snapshot.config);
+        }
+        catch (error) {
+            ctx.logger.debug('utils-agents: cannot persist skill repository state: ' + errorMessage(error));
+        }
+    }
+    return results;
+}
+/**
+ * Clone or fast-forward one configured checkout, then refresh its submodules.
+ * @param ctx - plugin context for warnings.
+ * @param state - one repository configuration.
+ * @param options - per-call behavior.
+ * @returns the new status plus whether the checkout changed.
+ */
+async function syncRepository(ctx, state, options) {
     const key = await sharedKeyStatus(state);
     if (state.keyPath !== '' && key.file === undefined)
         throw new AgentsError('配置的密钥路径不存在', 409);
@@ -127,12 +214,14 @@ export async function pullSharedRepo(ctx, options) {
     const target = state.targetDir;
     const cloneUrl = cloneUrlFor(parsed, key.file);
     let message = '';
+    let changed = false;
     if (!(await exists(target))) {
         await mkdir(dirname(target), { recursive: true });
         const cloned = await runGit(['clone', '--depth', '1', '--branch', state.branch, '--single-branch', cloneUrl, target], undefined, key.file);
         if (cloned.code !== 0)
             throw pullError('克隆仓库失败', cloned);
         message = '已 clone 分支 ' + state.branch;
+        changed = true;
     }
     else {
         if (!(await directoryOf(target)))
@@ -153,6 +242,18 @@ export async function pullSharedRepo(ctx, options) {
         if (current.stdout.trim() !== state.branch) {
             throw new AgentsError('检出目录当前分支是 ' + current.stdout.trim() + '，配置分支是 ' + state.branch, 409);
         }
+        if (options.skipDirty) {
+            const dirty = await runGit(['-C', target, 'status', '--porcelain'], undefined, key.file);
+            if (dirty.code === 0 && dirty.stdout.trim() !== '') {
+                return {
+                    target: await targetStatus(ctx, state),
+                    message: '工作区有本地改动，跳过自动更新',
+                    changed: false,
+                    skipped: true,
+                };
+            }
+        }
+        const before = await runGit(['-C', target, 'rev-parse', 'HEAD'], undefined, key.file);
         const shallow = await runGit(['-C', target, 'rev-parse', '--is-shallow-repository'], undefined, key.file);
         const fetchArgs = shallow.code === 0 && shallow.stdout.trim() === 'true'
             ? ['-C', target, 'fetch', '--unshallow', 'origin', state.branch]
@@ -163,32 +264,23 @@ export async function pullSharedRepo(ctx, options) {
         const merged = await runGit(['-C', target, 'merge', '--ff-only', 'FETCH_HEAD'], undefined, key.file);
         if (merged.code !== 0)
             throw pullError('快进合并失败', merged);
-        message = '已快进到最新提交';
+        const after = await runGit(['-C', target, 'rev-parse', 'HEAD'], undefined, key.file);
+        changed = before.code !== 0 || after.code !== 0 || before.stdout.trim() !== after.stdout.trim();
+        message = changed ? '已快进到最新提交' : '已是最新提交';
     }
     if (state.recurseSubmodules) {
         const sync = await runGit(['-C', target, 'submodule', 'sync', '--recursive'], undefined, key.file);
         if (sync.code !== 0)
             ctx.logger.warn('utils-agents: shared submodule sync failed: ' + sync.stderr.trim());
         const update = await runGit(['-C', target, 'submodule', 'update', '--init', '--recursive'], undefined, key.file);
-        if (update.code !== 0)
+        if (update.code !== 0) {
             ctx.logger.warn('utils-agents: shared submodule update failed: ' + update.stderr.trim());
+        }
+        else if (update.stdout.trim() !== '') {
+            changed = true;
+        }
     }
-    const status = await targetStatus(ctx, { ...state });
-    await writeSharedRepoState({
-        ...state,
-        lastSync: {
-            at: new Date().toISOString(),
-            ok: true,
-            commit: status.commit ?? '',
-            skills: status.skills,
-            message,
-        },
-    });
-    return sharedRepoView(ctx, options);
-}
-/** The legacy state path shared with the old global route. */
-export function sharedRepoStatePath() {
-    return join(dshHome(), 'storages', STATE_FILE_NAME);
+    return { target: await targetStatus(ctx, state), message, changed, skipped: false };
 }
 /** The legacy deploy-key path shared with the old global route. */
 export function sharedStoredKeyPath() {
@@ -246,21 +338,6 @@ async function countSkills(ctx, root) {
     }, ctx);
     return count;
 }
-/** Persist the shared repository settings. */
-async function writeSharedRepoState(state) {
-    const file = sharedRepoStatePath();
-    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
-    const temp = file + '.' + randomSuffix() + '.tmp';
-    try {
-        await writeFile(temp, JSON.stringify(state, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
-        await rename(temp, file);
-    }
-    catch (error) {
-        await rm(temp, { force: true });
-        throw error;
-    }
-    await chmod(file, 0o600);
-}
 /** Build a sanitized git failure. */
 function pullError(prefix, outcome) {
     const detail = outcome.stderr.trim() || outcome.spawnError || (outcome.timedOut ? 'timeout' : 'exit ' + String(outcome.code));
@@ -269,30 +346,6 @@ function pullError(prefix, outcome) {
 /** Read one string field or its fallback. */
 function textValue(value, fallback) {
     return typeof value === 'string' && value.trim() !== '' ? value.trim() : fallback;
-}
-/** Read one absolute path field or its fallback. */
-function absoluteValue(value, fallback) {
-    if (typeof value !== 'string' || value.trim() === '')
-        return fallback;
-    try {
-        return expandAbsolute(value);
-    }
-    catch {
-        return fallback;
-    }
-}
-/** Normalize a persisted sync record. */
-function normalizeSync(raw) {
-    if (raw === null || typeof raw !== 'object')
-        return null;
-    const record = raw;
-    return {
-        at: typeof record.at === 'string' ? record.at : '',
-        ok: record.ok === true,
-        commit: typeof record.commit === 'string' ? record.commit : '',
-        skills: typeof record.skills === 'number' ? record.skills : 0,
-        message: typeof record.message === 'string' ? record.message : '',
-    };
 }
 /** Short random suffix for one temporary file. */
 function randomSuffix() {

@@ -12,11 +12,15 @@
 import { watch } from 'node:fs';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { readUtilsConfig } from './utils-config.js';
 /** Provider name reported in the skill catalog. */
 export const PROVIDER_NAME = 'utils-agents';
 /** Ranks sit one step below the shipped filesystem provider, so flat skills win collisions. */
 const RANKS = {
+    // An explicitly configured Skill repository outranks every inferred root, so
+    // the checkout the operator named wins a name collision.
+    'skill-repo': 90,
     'project-dsh': 110,
     'project-agents': 210,
     custom: 310,
@@ -33,6 +37,7 @@ export const SKILL_DISCOVERY_DEFAULTS = {
     pollIntervalMs: 2000,
     includeProjectRoots: true,
     includeUserRoots: true,
+    includeSkillRepositories: true,
     followSymlinks: false,
     extraRoots: [],
     ignoreDirs: ['.system', 'node_modules', '.git'],
@@ -41,12 +46,13 @@ export const SKILL_DISCOVERY_DEFAULTS = {
  * Register the recursive skill provider on the host `skills` registry.
  * @param ctx - plugin context carrying the `skills` service.
  * @param config - optional row config; see {@link normalizeConfig}.
+ * @returns a handle that refreshes the catalog from outside the provider.
  */
 export function applySkillDiscovery(ctx, config) {
     const registry = ctx.skills;
     if (registry === undefined || typeof registry.registerProvider !== 'function') {
         ctx.logger.warn('utils-agents skills: the host provides no skill registry; nested discovery is off');
-        return;
+        return { refresh() { } };
     }
     let provider;
     registry.registerProvider((control) => {
@@ -59,6 +65,7 @@ export function applySkillDiscovery(ctx, config) {
             await provider?.dispose();
         };
     }, 'utils-agents skills: watcher');
+    return { refresh: () => provider?.refresh() };
 }
 /** Provider that adds nested `SKILL.md` bundles to the skill catalog. */
 class RecursiveSkillProvider {
@@ -102,7 +109,14 @@ class RecursiveSkillProvider {
             for (const candidate of scan.candidates)
                 candidates.push(candidate);
         }
-        return complete ? candidates : { candidates, complete };
+        const unique = await dedupeCandidates(candidates);
+        return complete ? unique : { candidates: unique, complete };
+    }
+    /** Invalidate the visible catalog immediately (used after a repository pull). */
+    refresh() {
+        if (this.disposed)
+            return;
+        this.control.invalidate();
     }
     /** Pick up Settings changes; the Loader updates volatile refs in place. */
     syncOptions() {
@@ -162,27 +176,28 @@ class RecursiveSkillProvider {
      */
     async roots(cwd) {
         const roots = [];
+        const startDepth = this.options.minDepth;
         if (this.options.includeProjectRoots && typeof cwd === 'string' && cwd.length > 0) {
             const projectRoot = await findProjectRoot(resolve(cwd), this.ctx);
-            roots.push({ path: join(projectRoot, '.dsh', 'skills'), source: 'project-dsh', rank: RANKS['project-dsh'] });
-            roots.push({ path: join(projectRoot, '.agents', 'skills'), source: 'project-agents', rank: RANKS['project-agents'] });
+            roots.push({ path: join(projectRoot, '.dsh', 'skills'), source: 'project-dsh', rank: RANKS['project-dsh'], startDepth });
+            roots.push({ path: join(projectRoot, '.agents', 'skills'), source: 'project-agents', rank: RANKS['project-agents'], startDepth });
         }
         for (const path of this.options.extraRoots) {
-            roots.push({ path, source: 'custom', rank: RANKS.custom });
+            roots.push({ path, source: 'custom', rank: RANKS.custom, startDepth });
         }
         if (this.options.includeUserRoots) {
-            roots.push({ path: join(agentHome('DSH_HOME', '.dsh'), 'skills'), source: 'user-dsh', rank: RANKS['user-dsh'] });
-            roots.push({ path: join(agentHome('DSH_AGENTS_HOME', '.agents'), 'skills'), source: 'user-agents', rank: RANKS['user-agents'] });
+            roots.push({ path: join(agentHome('DSH_HOME', '.dsh'), 'skills'), source: 'user-dsh', rank: RANKS['user-dsh'], startDepth });
+            roots.push({ path: join(agentHome('DSH_AGENTS_HOME', '.agents'), 'skills'), source: 'user-agents', rank: RANKS['user-agents'], startDepth });
         }
-        const seen = new Set();
-        const unique = [];
-        for (const root of roots) {
-            if (seen.has(root.path))
-                continue;
-            seen.add(root.path);
-            unique.push(root);
+        if (this.options.includeSkillRepositories) {
+            // A configured Skill repository owns its whole tree: the walk starts at the
+            // checkout root (depth 0) instead of the usual minDepth, so a SKILL.md at
+            // the repository root and every nested bundle are discovered.
+            for (const repository of await configuredSkillRepositories()) {
+                roots.push({ path: repository.targetDir, source: 'custom', rank: RANKS['skill-repo'], startDepth: 0 });
+            }
         }
-        return unique;
+        return dedupeRoots(roots);
     }
     /**
      * Start a watcher per known root so a new nested skill invalidates the cache.
@@ -290,6 +305,64 @@ class RecursiveSkillProvider {
     }
 }
 /**
+ * The configured Skill repository checkouts, read from
+ * `$DSH_HOME/utils/utils.json`. A repository without a URL or an absolute
+ * checkout is ignored instead of failing discovery.
+ * @returns absolute checkout paths in configuration order.
+ */
+async function configuredSkillRepositories() {
+    const { config } = await readUtilsConfig();
+    return config.skillRepositories.filter((repository) => repository.repoUrl !== '' && isAbsolute(repository.targetDir));
+}
+/**
+ * De-duplicate roots by path, keeping the highest-precedence descriptor.
+ * @param roots - roots in construction order.
+ * @returns unique roots in first-seen order.
+ */
+function dedupeRoots(roots) {
+    const byPath = new Map();
+    for (const root of roots) {
+        const existing = byPath.get(root.path);
+        if (existing === undefined || root.rank < existing.rank)
+            byPath.set(root.path, root);
+    }
+    return [...byPath.values()];
+}
+/**
+ * Collapse candidates that resolve to the same file. A configured repository is
+ * often also reachable through a symlinked standard root (for example
+ * `$DSH_HOME/skills -> <checkout>`), and scanning both must not duplicate skills.
+ * @param candidates - candidates from every root, in precedence order.
+ * @returns one candidate per real file, keeping the lowest rank.
+ */
+async function dedupeCandidates(candidates) {
+    const byPath = new Map();
+    const unique = [];
+    for (const candidate of candidates) {
+        const path = candidate.path;
+        if (path === undefined) {
+            unique.push(candidate);
+            continue;
+        }
+        let key;
+        try {
+            key = await realpath(path);
+        }
+        catch {
+            key = resolve(path);
+        }
+        const at = byPath.get(key);
+        if (at === undefined) {
+            byPath.set(key, unique.length);
+            unique.push(candidate);
+            continue;
+        }
+        if (candidate.rank < unique[at].rank)
+            unique[at] = candidate;
+    }
+    return unique;
+}
+/**
  * Depth-limited recursive scan of one skill root for nested `SKILL.md` files.
  * @param root - resolved root descriptor.
  * @param options - normalized plugin options.
@@ -314,7 +387,7 @@ async function scanRoot(root, options, ctx, providerName) {
             }
             continue;
         }
-        if (current.depth >= options.minDepth && entries.some((entry) => entry.name === SKILL_FILE)) {
+        if (current.depth >= root.startDepth && entries.some((entry) => entry.name === SKILL_FILE)) {
             const file = join(current.dir, SKILL_FILE);
             const parsed = await readSkillCandidate(file, root, ctx, providerName);
             if (parsed !== undefined)
@@ -682,7 +755,7 @@ async function scanRootSignature(root, options, ctx) {
         catch {
             continue;
         }
-        if (current.depth >= options.minDepth && entries.some((entry) => entry.name === SKILL_FILE)) {
+        if (current.depth >= root.startDepth && entries.some((entry) => entry.name === SKILL_FILE)) {
             const file = join(current.dir, SKILL_FILE);
             try {
                 const info = await stat(file);
@@ -753,6 +826,7 @@ function normalizeConfig(ctx, raw) {
     options.watch = booleanOption('watch', value('watch') ?? SKILL_DISCOVERY_DEFAULTS.watch);
     options.includeProjectRoots = booleanOption('includeProjectRoots', value('includeProjectRoots') ?? SKILL_DISCOVERY_DEFAULTS.includeProjectRoots);
     options.includeUserRoots = booleanOption('includeUserRoots', value('includeUserRoots') ?? SKILL_DISCOVERY_DEFAULTS.includeUserRoots);
+    options.includeSkillRepositories = booleanOption('includeSkillRepositories', value('includeSkillRepositories') ?? SKILL_DISCOVERY_DEFAULTS.includeSkillRepositories);
     options.followSymlinks = booleanOption('followSymlinks', value('followSymlinks') ?? SKILL_DISCOVERY_DEFAULTS.followSymlinks);
     options.extraRoots = stringArray('extraRoots', value('extraRoots') ?? SKILL_DISCOVERY_DEFAULTS.extraRoots).map((path) => resolve(path));
     options.ignoreDirs = stringArray('ignoreDirs', value('ignoreDirs') ?? SKILL_DISCOVERY_DEFAULTS.ignoreDirs);
@@ -774,6 +848,7 @@ function sameOptions(a, b) {
         && a.pollIntervalMs === b.pollIntervalMs
         && a.includeProjectRoots === b.includeProjectRoots
         && a.includeUserRoots === b.includeUserRoots
+        && a.includeSkillRepositories === b.includeSkillRepositories
         && a.followSymlinks === b.followSymlinks
         && sameList(a.extraRoots, b.extraRoots)
         && sameList(a.ignoreDirs, b.ignoreDirs);

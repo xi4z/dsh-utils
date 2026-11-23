@@ -84,8 +84,9 @@ profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 p
 推 GitHub 与发 npm 合成一次操作——打 tag 触发 [`publish.yml`](.github/workflows/publish.yml)：
 
 ```sh
-git push                                    # 先推代码
-git tag v0.7.1 && git push origin v0.7.1    # 再推 tag，CI 里 build + 发布全部五个包
+git push                                                   # 先推代码
+git tag v$(node -p "require('./package.json').version")     # 打 tag：版本号取根包 version
+git push origin --follow-tags                              # 再推 tag，CI 里 build + 发布全部五个包
 ```
 
 tag 必须等于根包 `package.json` 的版本，否则 job 直接失败。CI 里 `pnpm release` 按依赖顺序发五个包，带 `--provenance`。
@@ -116,7 +117,7 @@ pnpm release --dry-run   # 只看会不会发，不动 registry
     └── json-canvas/SKILL.md       ← 本组件
 ```
 
-扫描根按优先级：项目最近的 `.git` 下的 `.dsh/skills`、`.agents/skills`；`extraRoots`；`$DSH_HOME/skills`；`$DSH_AGENTS_HOME/skills`（两个 home 默认是 `~/.dsh` 与 `~/.agents`）。同名技能以先列出的根为准，扁平技能优先（嵌套候选 rank 低一档）。
+扫描根按优先级：项目最近的 `.git` 下的 `.dsh/skills`、`.agents/skills`；`extraRoots`；`$DSH_HOME/skills`；`$DSH_AGENTS_HOME/skills`（两个 home 默认是 `~/.dsh` 与 `~/.agents`）；最后是 `$DSH_HOME/utils/utils.json` 里配置的 Skill 仓库（从仓库根开始，见下）。同名技能以 rank 小者为准，扁平技能优先（嵌套候选 rank 低一档）。
 
 | 字段 | 默认 | 含义 |
 |---|---|---|
@@ -127,11 +128,46 @@ pnpm release --dry-run   # 只看会不会发，不动 registry
 | `pollIntervalMs` | `2000` | 不支持递归监听时的轮询间隔 |
 | `includeProjectRoots` | `true` | 扫项目级技能根 |
 | `includeUserRoots` | `true` | 扫用户级技能根 |
+| `includeSkillRepositories` | `true` | 把 `utils.json` 配置的 Skill 仓库作为扫描根 |
 | `followSymlinks` | `false` | 跟随符号链接目录（带环路保护） |
 | `extraRoots` | `[]` | 追加技能根，绝对路径 |
 | `ignoreDirs` | `[".system","node_modules",".git"]` | 永不进入的目录名 |
 
 识别的 frontmatter 字段：`name`、`description`，可选 `whenToUse`、`disable-model-invocation`、`user-invocable`。非法文件记 warning，跳过。
+
+#### 配置的 Skill 仓库：从仓库根递归 + 定时更新
+
+`$DSH_HOME/utils/utils.json` 是 utils 的配置文件；面板「共享技能仓库」保存的就是这一份（首次读取时若文件不存在，会自动从旧的 `$DSH_HOME/storages/dsh-utils-ui.json` 迁移，旧文件保留不删）：
+
+```json
+{
+  "version": 1,
+  "skillRepositories": [
+    {
+      "repoUrl": "git@github.com:xi4z/skills.git",
+      "branch": "Agent",
+      "targetDir": "/root/core/projects/skills-agent",
+      "keyPath": "",
+      "recurseSubmodules": true,
+      "lastSync": { "at": "2026-11-22T10:00:00.000Z", "ok": true, "commit": "…", "skills": 96, "message": "已快进到最新提交" }
+    }
+  ],
+  "autoUpdate": true,
+  "autoSyncPresets": true,
+  "updateIntervalMinutes": 60
+}
+```
+
+- 每个 `targetDir` 都是一个发现根：从**仓库根**（depth 0）开始递归，仓库根自己的 `SKILL.md` 和任意深度的技能包都会进目录，不受 `minDepth` 限制；`maxDepth` 仍然生效，`ignoreDirs` 照旧跳过。
+- 配置仓库的 rank 是 90，优先于项目级/用户级技能根；同一文件同时通过软链接（如 `~/.dsh/skills -> <checkout>`）被两个根看到时，按真实路径去重，只保留 rank 更小的那份。
+- 定时更新：激活 5 分钟后第一次，之后每隔 `updateIntervalMinutes`（默认 60，可设 5–1440）执行 clone 或 `fetch` + `merge --ff-only`，再 `submodule sync --recursive` + `submodule update --init --recursive`；只有提交或子模块真的变了才刷新技能目录。
+- 预设同步：**仓库是唯一事实来源**。`autoSyncPresets`（默认 `true`）为真时，每次定时更新后对**列表里每个仓库**执行：
+  - `new` / `update`：复制到 `$DSH_HOME/.agent-presets/<id>/` 并立即注册成宿主预设，`same` 不重写；
+  - 仓库里已删除、且本机存在同一预设（`shared-presets.json` 清单记录过，或内容本来就一致而被自动登记）的：删除本机 `<id>` 目录并注销；
+  - **DSH 自带预设（`builtinPresets`，默认 `standard`/`ptc`/`minimal`/`creator`）豁免**，不同步、不删除；本机自己新建、清单里没有的预设也不会被删；checkout 缺失或不可读时不做任何删除。
+  - 只处理 `utils.json` 里列出的 Skill 仓库，`presetSourceDirs` 等额外来源仍走面板「预设同步」手动同步；**自动方向永远不会写仓库或 push**，增删预设请在仓库里改完推送。
+- 自动更新不碰脏工作区：`git status --porcelain` 有输出就跳过（面板手动「拉取」仍会失败并给出原因）；所有失败只记 warning，不 reset、不 force、不 push。
+- `autoUpdate` / `autoSyncPresets` 两个开关互相独立，分别关掉「拉仓库」和「同步预设」，面板的「拉取」「同步」「发布预设」按钮仍可用。
 
 ### 模型可见性
 
@@ -189,14 +225,15 @@ Deploy Key 按预设保存到 `$DSH_HOME/storages/dsh-utils-agents/<preset>.key`
 
 预设目录必须带 `preset.yml` 或 `agent.cordis.yml`；单个预设目录形式的 id 取 `preset.yml` 的 `id`，没有就取目录名。
 
-扫描来源：当前选中预设同步出来的技能仓库 checkout（`<preset>/skills/<targetSubdir>`）、共享技能仓库的 checkout（`$DSH_HOME/storages/dsh-utils-ui.json` 的 `targetDir`，默认 `$DSH_HOME/skills/herskill`）、`$DSH_HOME/skills` 及其带 `.dsh` 的一级子目录，以及配置项 `presetSourceDirs` 里列出的额外仓库，按真实路径去重。仓库本身不会被修改。
+扫描来源：当前选中预设同步出来的技能仓库 checkout（`<preset>/skills/<targetSubdir>`）、共享技能仓库的 checkout（`$DSH_HOME/utils/utils.json` 的 `skillRepositories[0].targetDir`，默认 `$DSH_HOME/skills/utils-skill`）、`$DSH_HOME/skills` 及其带 `.dsh` 的一级子目录，以及配置项 `presetSourceDirs` 里列出的额外仓库，按真实路径去重。仓库本身不会被修改。
 
 共享技能仓库在面板里直接配置：仓库地址、分支、检出目录、可选密钥路径、Deploy Key 私钥；点「拉取」做 clone 或 `fetch` + `merge --ff-only`（浅克隆先 `--unshallow`，子模块可选），完成后 `.dsh/preset` 自动出现在下面的来源列表。检出目录就是**仓库根目录**，可以是任意绝对路径（如 `~/core/projects/skills`、`~/.dsh/skills-src/skills`），不必叫 `.dsh`，也不需要指向 `~/.dsh`；预设固定从 `<检出目录>/.dsh/preset` 读取。
 
 存储：
 
-- 设置：`$DSH_HOME/storages/dsh-utils-ui.json`（`repoUrl` / `branch` / `targetDir` / `keyPath` / `recurseSubmodules` / `lastSync`）
-- Deploy Key：`$DSH_HOME/storages/dsh-utils-ui.deploy-key`（600，不返回浏览器）
+- 设置：`$DSH_HOME/utils/utils.json`（`skillRepositories[]` 里的 `repoUrl` / `branch` / `targetDir` / `keyPath` / `recurseSubmodules` / `lastSync`，以及 `autoUpdate` / `autoSyncPresets` / `updateIntervalMinutes`）
+- 迁移：`$DSH_HOME/utils/utils.json` 不存在时读取一次旧的 `$DSH_HOME/storages/dsh-utils-ui.json` 并写回新文件；旧文件保留
+- Deploy Key：`$DSH_HOME/storages/dsh-utils-ui.deploy-key`（600，不返回浏览器；密钥不是配置，仍留在 `storages`）
 - 通用 Deploy Key：`$DSH_HOME/storages/dsh-utils-agents/deploy-key`（600，不返回浏览器）
 - 密钥优先级：`keyPath` 指向的私钥 > 该仓库保存的 Deploy Key > 通用 Deploy Key > 无；公开 `https://` / `file://` 可免密钥
 
@@ -292,7 +329,7 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
 | `updateRegistry` | `https://registry.npmjs.org` | 查询发布版本用的 registry，可换镜像 |
 | `updateAutoInstall` | `true` | 查到新版本就后台执行 `pnpm add` 自动安装（重启后生效） |
 
-技能发现字段见上面的表；`disabledSkills` 见「模型可见性」。宿主半侧在 `packages/utils-agents/src/`（`index.ts` 路由、`presets.ts` 预设/技能/文件、`git.ts` 仓库同步、`update.ts` 发布版本检查），浏览器半侧在 `@xi4z/dsh-utils-ui` 的 `client.js`。停用 `utils-agents` 行后路由消失，侧边栏面板显示 404 提示。
+技能发现字段见上面的表；`disabledSkills` 见「模型可见性」。宿主半侧在 `packages/utils-agents/src/`（`index.ts` 路由、`presets.ts` 预设/技能/文件、`git.ts` 预设仓库同步、`global-repo.ts` 共享仓库与定时刷新、`utils-config.ts` 配置读写、`skill-repo-updater.ts` 定时器、`skill-discovery.ts` 递归发现、`update.ts` 发布版本检查），浏览器半侧在 `@xi4z/dsh-utils-ui` 的 `client.js`。停用 `utils-agents` 行后路由消失，侧边栏面板显示 404 提示。
 
 ## 组件二：无人值守审批门控
 

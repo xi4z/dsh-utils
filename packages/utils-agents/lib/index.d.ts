@@ -60,6 +60,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     pollIntervalMs: z<number, number, "volatile-defined">;
     includeProjectRoots: z<boolean, boolean, "volatile-defined">;
     includeUserRoots: z<boolean, boolean, "volatile-defined">;
+    includeSkillRepositories: z<boolean, boolean, "volatile-defined">;
     followSymlinks: z<boolean, boolean, "volatile-defined">;
     extraRoots: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
     ignoreDirs: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
@@ -85,6 +86,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     pollIntervalMs: z<number, number, "volatile-defined">;
     includeProjectRoots: z<boolean, boolean, "volatile-defined">;
     includeUserRoots: z<boolean, boolean, "volatile-defined">;
+    includeSkillRepositories: z<boolean, boolean, "volatile-defined">;
     followSymlinks: z<boolean, boolean, "volatile-defined">;
     extraRoots: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
     ignoreDirs: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;

@@ -20,6 +20,7 @@ export declare const SKILL_DISCOVERY_DEFAULTS: {
     pollIntervalMs: number;
     includeProjectRoots: boolean;
     includeUserRoots: boolean;
+    includeSkillRepositories: boolean;
     followSymlinks: boolean;
     extraRoots: string[];
     ignoreDirs: string[];
@@ -39,14 +40,21 @@ export interface SkillDiscoveryConfig {
     readonly pollIntervalMs?: MaybeRef<number>;
     readonly includeProjectRoots?: MaybeRef<boolean>;
     readonly includeUserRoots?: MaybeRef<boolean>;
+    readonly includeSkillRepositories?: MaybeRef<boolean>;
     readonly followSymlinks?: MaybeRef<boolean>;
     readonly extraRoots?: MaybeRef<readonly string[]>;
     readonly ignoreDirs?: MaybeRef<readonly string[]>;
+}
+/** Handle returned by {@link applySkillDiscovery} for out-of-band refreshes. */
+export interface SkillDiscoveryHandle {
+    /** Invalidate the catalog, for example after a Skill repository was pulled. */
+    refresh(): void;
 }
 /**
  * Register the recursive skill provider on the host `skills` registry.
  * @param ctx - plugin context carrying the `skills` service.
  * @param config - optional row config; see {@link normalizeConfig}.
+ * @returns a handle that refreshes the catalog from outside the provider.
  */
-export declare function applySkillDiscovery(ctx: Context, config?: SkillDiscoveryConfig): void;
+export declare function applySkillDiscovery(ctx: Context, config?: SkillDiscoveryConfig): SkillDiscoveryHandle;
 export {};

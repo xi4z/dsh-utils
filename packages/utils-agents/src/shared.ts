@@ -27,6 +27,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { scanSkills } from './presets.js'
 import { readRepoState, targetPath } from './git.js'
+import { readUtilsConfig } from './utils-config.js'
 import {
   BODY_LIMIT_BYTES,
   IGNORED_DIRS,
@@ -37,6 +38,7 @@ import {
   exists,
   expandAbsolute,
   insideJoin,
+  isInside,
   stringList,
   agentsStorageDir,
   type Options,
@@ -181,8 +183,92 @@ export async function syncSharedPresets(
   const targets = requested.length === 0 ? all : all.filter((row) => requested.includes(row.id))
   if (requested.length > 0 && targets.length === 0) throw new AgentsError('没有找到要同步的预设：' + requested.join(', '), 404)
 
+  const results = await copyPresetRows(ctx, targets, prune, manifest)
+  if (results.some((result) => result.error === undefined)) await writeManifest(manifest)
+  return { results, view: await sharedPresetView(ctx, options, preset) }
+}
+
+/** Payload of one automatic preset pass. */
+export interface AutoPresetSyncPayload extends SharedSyncPayload {
+  /** Preset ids whose local copy was removed because the repository dropped them. */
+  readonly removed: string[]
+}
+
+/**
+ * Mirror the presets carried by the configured Skill repositories into the
+ * preset home.
+ *
+ * The repository is the only source of truth: new and outdated presets are
+ * copied, and a preset the repository no longer carries is removed locally when
+ * an earlier pass synced it (the manifest records that ownership). Built-in
+ * presets and presets that only ever existed locally are never touched, and a
+ * checkout that is missing or unreadable never triggers a removal.
+ * @param ctx - host context.
+ * @param options - normalized settings.
+ * @returns per-preset results, removed ids, and the refreshed view.
+ */
+export async function autoSyncSharedPresets(ctx: Context, options: Options): Promise<AutoPresetSyncPayload> {
+  const manifest = await readManifest()
+  const view = await sharedPresetView(ctx, options, null)
+  const repoRoots = view.sources
+    .filter((source) => source.kind === 'global-repo' && source.exists)
+    .map((source) => source.path)
+  const carried = new Set<string>()
+  for (const source of view.sources) {
+    if (source.kind !== 'global-repo' || !source.exists) continue
+    for (const preset of source.presets) carried.add(preset.id)
+  }
+
+  const removed: string[] = []
+  const localRoot = join(dshHome(), '.agent-presets')
+  for (const [id, entry] of Object.entries(manifest.presets)) {
+    if (carried.has(id) || options.builtinPresets.includes(id) || RESERVED_IDS.has(id)) continue
+    if (entry.source === '' || !repoRoots.some((root) => entry.source === root || isInside(root, entry.source))) continue
+    delete manifest.presets[id]
+    const target = join(localRoot, id)
+    if (!(await directoryOf(target))) continue
+    try {
+      await rm(target, { recursive: true, force: true })
+      removed.push(id)
+    } catch (error) {
+      ctx.logger.warn('utils-agents: cannot remove preset ' + id + ' dropped by the repository: ' + errorMessage(error))
+    }
+  }
+
+  const targets = view.sources
+    .filter((source) => source.kind === 'global-repo' && source.exists)
+    .flatMap((source) => source.presets)
+    .filter((row) => !options.builtinPresets.includes(row.id))
+    .filter((row) => row.status === 'new' || row.status === 'update')
+  // A preset that is already identical must still be recorded as managed, or a
+  // later repository deletion could not be told apart from a local-only preset.
+  let ownershipChanged = false
+  for (const source of view.sources) {
+    if (source.kind !== 'global-repo' || !source.exists) continue
+    for (const row of source.presets) {
+      if (row.status !== 'same' || options.builtinPresets.includes(row.id)) continue
+      if (manifest.presets[row.id] !== undefined) continue
+      const files = (await collectFiles(ctx, row.sourcePath)).map((file) => file.rel)
+      manifest.presets[row.id] = { source: row.sourceRoot, syncedAt: new Date().toISOString(), files }
+      ownershipChanged = true
+    }
+  }
+  const results = targets.length === 0 ? [] : await copyPresetRows(ctx, targets, false, manifest)
+  if (ownershipChanged || removed.length > 0 || results.some((result) => result.error === undefined)) {
+    await writeManifest(manifest)
+  }
+  return { results, removed, view: await sharedPresetView(ctx, options, null) }
+}
+
+/** Copy one scanned batch, recording each outcome in the manifest. */
+async function copyPresetRows(
+  ctx: Context,
+  rows: readonly SharedPresetView[],
+  prune: boolean,
+  manifest: SharedManifest,
+): Promise<SharedSyncResult[]> {
   const results: SharedSyncResult[] = []
-  for (const row of targets) {
+  for (const row of rows) {
     if (row.status === 'invalid') {
       results.push({ id: row.id, status: row.status, written: 0, removed: 0, skipped: [], error: row.reason ?? '预设 id 不合法' })
       continue
@@ -198,8 +284,7 @@ export async function syncSharedPresets(
       results.push({ id: row.id, status: row.status, written: 0, removed: 0, skipped: [], error: message })
     }
   }
-  if (results.some((result) => result.error === undefined)) await writeManifest(manifest)
-  return { results, view: await sharedPresetView(ctx, options, preset) }
+  return results
 }
 
 /** The storage path of the shared-preset manifest. */
@@ -490,16 +575,17 @@ async function hashFile(path: string): Promise<string> {
   return createHash('sha256').update(content).digest('hex')
 }
 
-/** The checkout the legacy global skill-repository route syncs into. */
-async function legacySkillRepoRoot(): Promise<string> {
+/** The checkouts of the configured Skill repositories, from `utils.json`. */
+async function configuredSkillRepoRoots(): Promise<string[]> {
   try {
-    const raw = JSON.parse(await readFile(join(dshHome(), 'storages', 'dsh-utils-ui.json'), 'utf8')) as unknown
-    const record = raw !== null && typeof raw === 'object' ? raw as Record<string, unknown> : {}
-    if (typeof record.targetDir === 'string' && record.targetDir.trim() !== '') return expandAbsolute(record.targetDir)
+    const roots = (await readUtilsConfig()).config.skillRepositories
+      .map((repository) => repository.targetDir)
+      .filter((path) => path !== '')
+    if (roots.length > 0) return roots
   } catch {
-    // Missing or malformed legacy state falls back to the shipped default.
+    // A missing or malformed document falls back to the shipped default.
   }
-  return join(dshHome(), 'skills', 'herskill')
+  return [join(dshHome(), 'skills', 'utils-skill')]
 }
 
 /** The repository roots to scan, in display order. */
@@ -514,12 +600,13 @@ async function presetSources(options: Options, preset: PresetInfo | null): Promi
       // A malformed repository configuration only hides that source.
     }
   }
-  const legacy = await legacySkillRepoRoot()
-  if (legacy !== null && await directoryOf(legacy)) out.push({ path: legacy, kind: 'global-repo' })
+  for (const shared of await configuredSkillRepoRoots()) {
+    if (await directoryOf(shared)) out.push({ path: shared, kind: 'global-repo' })
+  }
   const skills = join(dshHome(), 'skills')
   out.push({ path: skills, kind: 'skills-home' })
   // The legacy global repository may live one level below (for example
-  // $DSH_HOME/skills/herskill); treat any child that carries .dsh as a source.
+  // $DSH_HOME/skills/utils-skill); treat any child that carries .dsh as a source.
   try {
     const entries = await readdir(skills, { withFileTypes: true })
     entries.sort((left, right) => left.name.localeCompare(right.name))

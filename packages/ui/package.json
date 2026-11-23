@@ -1,6 +1,6 @@
 {
   "name": "@xi4z/dsh-utils-ui",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "dsh-utils component: the shared browser half — one configuration page for every dsh-utils row and the utils-agents sidebar panel.",
   "license": "MIT",
   "author": "xi4z",

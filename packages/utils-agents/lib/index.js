@@ -21,11 +21,12 @@ import { BODY_LIMIT_BYTES, DEFAULT_MAX_BYTES, GLOBAL_PRESET, AgentsError, failur
 import { discoverPresets, globalFiles, presetById, presetFiles, resolveFileId, toggleSkill, } from './presets.js';
 import { globalKeyStatus, readRepoState, repoView, saveGlobalKey, saveRepoConfig, saveRepoKey, syncRepo, } from './git.js';
 import { createLegacyBridge } from './legacy.js';
-import { sharedPresetView, syncSharedPresets } from './shared.js';
+import { autoSyncSharedPresets, sharedPresetView, syncSharedPresets } from './shared.js';
 import { pullSharedRepo, saveSharedRepoConfig, saveSharedRepoKey, sharedRepoView } from './global-repo.js';
 import { importNativePresets, nativePresetView, publishPresets } from './native.js';
 import { createUpdateChecker, startUpdateWatcher } from './update.js';
 import { SKILL_DISCOVERY_DEFAULTS, applySkillDiscovery, } from './skill-discovery.js';
+import { startSkillRepositoryUpdater } from './skill-repo-updater.js';
 import { ROUTE_PATH as SKILL_PANEL_ROUTE, applySkillPanel, } from './skill-panel.js';
 export const name = 'utils-agents';
 /** The merged component still needs the host skill registry. */
@@ -71,6 +72,8 @@ export const Config = z.object({
         .description('扫描项目级 .dsh/skills 与 .agents/skills。').volatile(),
     includeUserRoots: z.boolean().default(SKILL_DISCOVERY_DEFAULTS.includeUserRoots)
         .description('扫描用户级技能根。').volatile(),
+    includeSkillRepositories: z.boolean().default(SKILL_DISCOVERY_DEFAULTS.includeSkillRepositories)
+        .description('把 $DSH_HOME/utils/utils.json 里配置的 Skill 仓库作为根，从仓库根递归扫描。').volatile(),
     followSymlinks: z.boolean().default(SKILL_DISCOVERY_DEFAULTS.followSymlinks)
         .description('跟随符号链接目录（带环路保护）。').volatile(),
     extraRoots: z.array(z.string().min(1)).default([...SKILL_DISCOVERY_DEFAULTS.extraRoots])
@@ -116,9 +119,24 @@ export const Config = z.object({
 export function apply(ctx, config = {}) {
     // The two former components are host-only halves of this one now; the browser
     // half in @xi4z/dsh-utils-ui still renders their pages on this row.
-    applySkillDiscovery(ctx, config);
+    const discovery = applySkillDiscovery(ctx, config);
     applySkillPanel(ctx, config);
     const legacy = createLegacyBridge(ctx, config);
+    // Keep the configured Skill checkouts (and their submodules) fresh; a pull
+    // that moved a checkout refreshes the catalog immediately. The repository is
+    // the only source of truth for presets: the same schedule copies new/updated
+    // ones into the preset home and removes the ones it no longer carries.
+    startSkillRepositoryUpdater(ctx, {
+        invalidateSkills: () => discovery.refresh(),
+        syncPresets: async () => {
+            const payload = await autoSyncSharedPresets(ctx, normalizeOptions(config));
+            const synced = payload.results.filter((result) => result.error === undefined);
+            if (synced.length === 0 && payload.removed.length === 0)
+                return;
+            await legacy.ensure();
+            ctx.logger.info('utils-agents: auto-synced ' + synced.length + ' shared preset(s), removed ' + payload.removed.length + ' from configured repositories');
+        },
+    });
     const updates = createUpdateChecker(ctx, () => normalizeOptions(config));
     startUpdateWatcher(ctx, updates, () => normalizeOptions(config));
     ctx.effect(() => () => { void legacy.dispose(); }, 'utils-agents: legacy preset bridge');
