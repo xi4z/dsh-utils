@@ -1,6 +1,6 @@
 {
   "name": "@xi4z/dsh-utils-approval-policy",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "dsh-utils component: unattended approval gate that bounds approval requests and settles fail-closed.",
   "license": "MIT",
   "author": "xi4z",

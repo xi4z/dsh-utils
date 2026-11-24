@@ -714,6 +714,87 @@ test('reads and saves the shared skill repository settings and deploy key', asyn
   assert.equal(cleared.body.key.source, 'none')
 })
 
+test('bootstraps the default configuration into an empty utils.json', async (t) => {
+  const { connection, home } = await setup(t)
+  await mkdir(join(home, 'utils'), { recursive: true })
+  await writeFile(join(home, 'utils', 'utils.json'), '{}\n')
+
+  const view = await call(connection, ROUTE_PATHS.sharedRepo)
+  assert.equal(view.response.status, 200, JSON.stringify(view.body))
+  assert.equal(view.body.state.repoUrl, 'https://github.com/xi4z/skills')
+  assert.equal(view.body.state.branch, 'Agent')
+  assert.equal(view.body.state.targetDir, join(home, 'skills', 'utils-skill'))
+
+  const document = JSON.parse(await readFile(join(home, 'utils', 'utils.json'), 'utf8'))
+  assert.equal(document.version, 1)
+  assert.equal(document.skillRepositories.length, 1)
+  assert.equal(document.skillRepositories[0].repoUrl, 'https://github.com/xi4z/skills')
+  assert.equal(document.skillRepositories[0].branch, 'Agent')
+  assert.equal(document.skillRepositories[0].targetDir, join(home, 'skills', 'utils-skill'))
+  assert.equal(document.autoUpdate, true)
+  assert.equal(document.autoSyncPresets, true)
+  assert.equal(document.updateIntervalMinutes, 60)
+})
+
+test('creates the default configuration when the document is missing', async (t) => {
+  const { connection, home } = await setup(t)
+  const view = await call(connection, ROUTE_PATHS.sharedRepo)
+  assert.equal(view.response.status, 200, JSON.stringify(view.body))
+  assert.equal(view.body.state.repoUrl, 'https://github.com/xi4z/skills')
+  const document = JSON.parse(await readFile(join(home, 'utils', 'utils.json'), 'utf8'))
+  assert.equal(document.skillRepositories.length, 1)
+  assert.equal(document.skillRepositories[0].targetDir, join(home, 'skills', 'utils-skill'))
+})
+
+test('keeps a configured document untouched on read', async (t) => {
+  const { connection, home } = await setup(t)
+  await mkdir(join(home, 'utils'), { recursive: true })
+  const original = JSON.stringify({
+    version: 1,
+    skillRepositories: [{
+      repoUrl: 'file:///tmp/mine.git',
+      branch: 'main',
+      targetDir: join(home, 'mine'),
+      keyPath: '',
+      recurseSubmodules: false,
+      lastSync: null,
+    }],
+    autoUpdate: false,
+    autoSyncPresets: false,
+    updateIntervalMinutes: 15,
+  }, null, 2) + '\n'
+  await writeFile(join(home, 'utils', 'utils.json'), original)
+
+  const view = await call(connection, ROUTE_PATHS.sharedRepo)
+  assert.equal(view.body.state.repoUrl, 'file:///tmp/mine.git')
+  assert.equal(view.body.state.branch, 'main')
+  assert.equal(await readFile(join(home, 'utils', 'utils.json'), 'utf8'), original, 'a read never rewrites a configured document')
+})
+
+test('reports defaults for a malformed document without overwriting it', async (t) => {
+  const { connection, home } = await setup(t)
+  await mkdir(join(home, 'utils'), { recursive: true })
+  await writeFile(join(home, 'utils', 'utils.json'), '{ not json')
+
+  const view = await call(connection, ROUTE_PATHS.sharedRepo)
+  assert.equal(view.response.status, 200, JSON.stringify(view.body))
+  assert.equal(view.body.state.repoUrl, 'https://github.com/xi4z/skills')
+  assert.equal(await readFile(join(home, 'utils', 'utils.json'), 'utf8'), '{ not json', 'a malformed document stays repairable')
+})
+
+test('bootstraps defaults when the legacy document carries no repository', async (t) => {
+  const { connection, home } = await setup(t)
+  await mkdir(join(home, 'storages'), { recursive: true })
+  await writeFile(join(home, 'storages', 'dsh-utils-ui.json'), '{}\n')
+
+  const view = await call(connection, ROUTE_PATHS.sharedRepo)
+  assert.equal(view.response.status, 200, JSON.stringify(view.body))
+  assert.equal(view.body.state.repoUrl, 'https://github.com/xi4z/skills')
+  const document = JSON.parse(await readFile(join(home, 'utils', 'utils.json'), 'utf8'))
+  assert.equal(document.skillRepositories.length, 1)
+  assert.equal(document.skillRepositories[0].branch, 'Agent')
+})
+
 test('stores the shared repository settings in utils/utils.json', async (t) => {
   const { connection, home } = await setup(t)
   const target = join(home, 'shared-checkout')

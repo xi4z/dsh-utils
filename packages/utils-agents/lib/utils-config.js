@@ -17,6 +17,14 @@
  * untouched afterwards, so downgrading still works. Deploy Keys stay under
  * `$DSH_HOME/storages`: they are secrets, not configuration.
  *
+ * A missing document with no legacy state, or a document that carries neither
+ * repositories nor settings (an empty `{}` left by an older install), is
+ * converted to the shipped default configuration — one shared Skill repository
+ * at the default URL/branch — and written back, so an upgraded profile starts
+ * from the same defaults as a fresh install. A document that already configures
+ * anything is never rewritten by a read; a malformed document is reported as
+ * defaults without touching the file (a hand edit stays repairable).
+ *
  * @module dsh-utils/utils-agents/utils-config
  */
 import { randomBytes } from 'node:crypto';
@@ -33,6 +41,15 @@ export const MIN_SKILL_REPOSITORY_UPDATE_INTERVAL_MINUTES = 5;
 export const MAX_SKILL_REPOSITORY_UPDATE_INTERVAL_MINUTES = 1440;
 /** Branch used for a migrated repository that never recorded one. */
 const FALLBACK_BRANCH = 'Agent';
+/** Shipped default URL of the shared Skill repository (same as the preset default). */
+export const DEFAULT_SHARED_REPO_URL = 'https://github.com/xi4z/skills';
+/** Shipped default branch of the shared Skill repository. */
+export const DEFAULT_SHARED_REPO_BRANCH = 'Agent';
+/**
+ * Document keys that carry settings of their own. A document with none of
+ * these and no repository is treated as empty (see {@link isEmptyDocument}).
+ */
+const SETTING_KEYS = ['autoUpdate', 'autoSyncPresets', 'updateIntervalMinutes'];
 /** `$DSH_HOME/utils`. */
 export function utilsConfigDir() {
     return join(dshHome(), 'utils');
@@ -45,7 +62,7 @@ export function utilsConfigPath() {
 export function legacyUtilsStatePath() {
     return join(dshHome(), 'storages', 'dsh-utils-ui.json');
 }
-/** A fresh document with the shipped defaults. */
+/** The shipped settings with no repository; normalize starts from this baseline. */
 export function emptyUtilsConfig() {
     return {
         version: UTILS_CONFIG_VERSION,
@@ -55,11 +72,16 @@ export function emptyUtilsConfig() {
         updateIntervalMinutes: DEFAULT_SKILL_REPOSITORY_UPDATE_INTERVAL_MINUTES,
     };
 }
-/** The fallback repository the panel shows before anything is saved. */
+/**
+ * The fallback repository the panel shows before anything is saved, and the
+ * repository an empty document is bootstrapped with.
+ * @param options - row settings supplying the default URL/branch; omitted uses the shipped constants.
+ * @returns the default shared repository entry.
+ */
 export function defaultSkillRepository(options) {
     return {
-        repoUrl: options.defaultRepoUrl,
-        branch: options.defaultBranch,
+        repoUrl: options === undefined ? DEFAULT_SHARED_REPO_URL : options.defaultRepoUrl,
+        branch: options === undefined ? DEFAULT_SHARED_REPO_BRANCH : options.defaultBranch,
         targetDir: join(dshHome(), 'skills', 'utils-skill'),
         keyPath: '',
         recurseSubmodules: true,
@@ -67,11 +89,23 @@ export function defaultSkillRepository(options) {
     };
 }
 /**
+ * The shipped default configuration: the same settings as an empty document
+ * plus the default shared Skill repository. This is what a missing or empty
+ * `utils.json` turns into, so a fresh install and an upgraded one start equal.
+ * @returns a document to persist as-is.
+ */
+export function defaultUtilsConfig() {
+    return { ...emptyUtilsConfig(), skillRepositories: [defaultSkillRepository()] };
+}
+/**
  * Read the consolidated configuration.
  *
- * A missing file is migrated from the legacy state document (and written back
- * when that document exists); a malformed document yields the defaults without
- * destroying the file, so a hand-edit can be repaired.
+ * A missing file is migrated from the legacy state document when that document
+ * carries a repository, and otherwise becomes the shipped default
+ * configuration; an empty document is converted to the default and written
+ * back, so an upgraded profile ends up with the same document a fresh install
+ * gets. A malformed document yields the defaults without destroying the file,
+ * so a hand edit can be repaired.
  * @returns the normalized document, whether it existed, and its path.
  */
 export async function readUtilsConfig() {
@@ -83,9 +117,43 @@ export async function readUtilsConfig() {
     catch (error) {
         if (isAbsent(error))
             return migrateLegacyConfig(path);
+        // Unparsable: report defaults but never overwrite what may be a hand edit.
         return { config: emptyUtilsConfig(), existed: true, path };
     }
-    return { config: normalizeUtilsConfig(raw), existed: true, path };
+    if (!isEmptyDocument(raw))
+        return { config: normalizeUtilsConfig(raw), existed: true, path };
+    const config = defaultUtilsConfig();
+    await persistQuietly(config);
+    return { config, existed: true, path };
+}
+/**
+ * Whether a parsed document carries nothing worth keeping: no repository and
+ * no setting. The empty `{}` an older install left behind, and a
+ * `{"version": 1}` skeleton, both qualify; an explicit setting such as
+ * `autoUpdate: false` or `skillRepositories: []` does not.
+ * @param raw - parsed JSON value.
+ * @returns true when the default configuration should replace it.
+ */
+function isEmptyDocument(raw) {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw))
+        return true;
+    const record = raw;
+    const repositories = record.skillRepositories;
+    const hasRepository = Array.isArray(repositories)
+        ? repositories.length > 0
+        : record.repoUrl !== undefined || record.targetDir !== undefined;
+    if (hasRepository)
+        return false;
+    return !SETTING_KEYS.some((key) => record[key] !== undefined);
+}
+/** Write the document, ignoring a read-only home so a read never fails on it. */
+async function persistQuietly(config) {
+    try {
+        await writeUtilsConfig(config);
+    }
+    catch {
+        // A read-only home must not turn configuration reads into a failure.
+    }
 }
 /** Replace the document atomically with mode 0600. */
 export async function writeUtilsConfig(config) {
@@ -164,29 +232,27 @@ function normalizeSkillRepository(raw) {
     };
 }
 /**
- * Migrate the legacy single-repository document exactly once.
+ * Materialize the document a profile without one starts from.
+ *
+ * A legacy single-repository document wins when it names a repository;
+ * otherwise the shipped default configuration is used, so an upgraded profile
+ * ends up with defaults instead of an empty document. The result is always
+ * written back (best effort), and the legacy file is never modified.
  * @param path - the consolidated config path.
- * @returns the migrated snapshot; the legacy file is never modified.
+ * @returns the migrated snapshot.
  */
 async function migrateLegacyConfig(path) {
-    const config = emptyUtilsConfig();
+    const config = defaultUtilsConfig();
     try {
         const raw = JSON.parse(await readFile(legacyUtilsStatePath(), 'utf8'));
         const repository = normalizeSkillRepository(raw);
         if (repository !== undefined)
-            config.skillRepositories.push(repository);
+            config.skillRepositories = [repository];
     }
     catch {
-        // No legacy document, or it is unreadable: start empty.
+        // No legacy document, or it is unreadable: keep the shipped default.
     }
-    if (config.skillRepositories.length > 0) {
-        try {
-            await writeUtilsConfig(config);
-        }
-        catch {
-            // A read-only home must not turn discovery into a failure.
-        }
-    }
+    await persistQuietly(config);
     return { config, existed: false, path };
 }
 /** Clamp one refresh interval to the accepted range. */

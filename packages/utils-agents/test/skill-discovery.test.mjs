@@ -363,7 +363,7 @@ test('config: invalid values fail fast, unknown keys warn, extra roots resolve',
   assert.equal(error, undefined)
   assert.ok(ctx.warnings.some((warning) => warning.includes('unknown config key "mystery"')))
 
-  const mounted = mount({ includeUserRoots: false, includeProjectRoots: false, extraRoots: ['relative/skills'] })
+  const mounted = mount({ includeUserRoots: false, includeProjectRoots: false, includeSkillRepositories: false, extraRoots: ['relative/skills'] })
   const resolved = await mounted.provider.roots(undefined)
   assert.equal(resolved.length, 1)
   assert.equal(resolved[0].path, join(process.cwd(), 'relative', 'skills'))
@@ -396,7 +396,7 @@ test('roots: project roots come from the nearest .git ancestor, then user roots'
   const nested = join(project, 'packages', 'app')
   await mkdir(nested, { recursive: true })
 
-  const { provider } = mount({ watch: false, extraRoots: [] })
+  const { provider } = mount({ watch: false, includeSkillRepositories: false, extraRoots: [] })
   const resolved = await provider.roots(nested)
 
   const paths = resolved.map((root) => root.path)
@@ -410,7 +410,7 @@ test('roots: project roots come from the nearest .git ancestor, then user roots'
 
 test('roots: duplicate roots are de-duplicated by path', async () => {
   const root = await makeRoot()
-  const { provider } = mount({ includeProjectRoots: false, includeUserRoots: false, watch: false, extraRoots: [root, root] })
+  const { provider } = mount({ includeProjectRoots: false, includeUserRoots: false, includeSkillRepositories: false, watch: false, extraRoots: [root, root] })
   const resolved = await provider.roots(undefined)
   assert.equal(resolved.length, 1)
 })

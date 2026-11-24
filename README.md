@@ -140,7 +140,7 @@ pnpm release --dry-run   # 只看会不会发，不动 registry
 
 #### 配置的 Skill 仓库：从仓库根递归 + 定时更新
 
-`$DSH_HOME/utils/utils.json` 是 utils 的配置文件；面板「共享技能仓库」保存的就是这一份（首次读取时若文件不存在，会自动从旧的 `$DSH_HOME/storages/dsh-utils-ui.json` 迁移，旧文件保留不删）：
+`$DSH_HOME/utils/utils.json` 是 utils 的配置文件；面板「共享技能仓库」保存的就是这一份（首次读取时若文件不存在，会自动从旧的 `$DSH_HOME/storages/dsh-utils-ui.json` 迁移，旧文件保留不删；迁移不到仓库、或旧文件本身就是空配置 `{}` 时，会写入默认配置并继续使用，见下面的「默认配置」）：
 
 ```json
 {
@@ -161,6 +161,7 @@ pnpm release --dry-run   # 只看会不会发，不动 registry
 }
 ```
 
+- **默认配置**：文件不存在又迁移不到仓库、或旧文件本身是空配置（`{}`、`{"version":1}`，没有任何仓库和设置）时，第一次读取会把它写成默认配置——`skillRepositories` 里放一个默认共享仓库（`https://github.com/xi4z/skills`、`Agent`、`$DSH_HOME/skills/utils-skill`），`autoUpdate`/`autoSyncPresets` 为 `true`、`updateIntervalMinutes` 为 `60`。**升级前配置为空的老 profile 因此会直接变成默认配置**；已经写了任何配置（仓库或 `autoUpdate` 等设置）的文件读取时原样保留，坏掉的 JSON 只按默认值读取、不覆盖，方便手工修复。想保持空仓库列表，写一条显式设置即可（例如 `"autoUpdate": false`）。
 - 每个 `targetDir` 都是一个发现根：从**仓库根**（depth 0）开始递归，仓库根自己的 `SKILL.md` 和任意深度的技能包都会进目录，不受 `minDepth` 限制；`maxDepth` 仍然生效，`ignoreDirs` 照旧跳过。
 - 配置仓库的 rank 是 90，优先于项目级/用户级技能根；同一文件同时通过软链接（如 `~/.dsh/skills -> <checkout>`）被两个根看到时，按真实路径去重，只保留 rank 更小的那份。
 - 定时更新：激活 5 分钟后第一次，之后每隔 `updateIntervalMinutes`（默认 60，可设 5–1440）执行 clone 或 `fetch` + `merge --ff-only`，再 `submodule sync --recursive` + `submodule update --init --recursive`；只有提交或子模块真的变了才刷新技能目录。
@@ -235,7 +236,7 @@ Deploy Key 按预设保存到 `$DSH_HOME/storages/dsh-utils-agents/<preset>.key`
 存储：
 
 - 设置：`$DSH_HOME/utils/utils.json`（`skillRepositories[]` 里的 `repoUrl` / `branch` / `targetDir` / `keyPath` / `recurseSubmodules` / `lastSync`，以及 `autoUpdate` / `autoSyncPresets` / `updateIntervalMinutes`）
-- 迁移：`$DSH_HOME/utils/utils.json` 不存在时读取一次旧的 `$DSH_HOME/storages/dsh-utils-ui.json` 并写回新文件；旧文件保留
+- 迁移：`$DSH_HOME/utils/utils.json` 不存在时读取一次旧的 `$DSH_HOME/storages/dsh-utils-ui.json` 并写回新文件；旧文件保留。旧文件里没有仓库、或旧配置本身为空时，写回的是默认配置（默认共享仓库 + 默认开关）
 - Deploy Key：`$DSH_HOME/storages/dsh-utils-ui.deploy-key`（600，不返回浏览器；密钥不是配置，仍留在 `storages`）
 - 通用 Deploy Key：`$DSH_HOME/storages/dsh-utils-agents/deploy-key`（600，不返回浏览器）
 - 密钥优先级：`keyPath` 指向的私钥 > 该仓库保存的 Deploy Key > 通用 Deploy Key > 无；公开 `https://` / `file://` 可免密钥
