@@ -52,11 +52,14 @@
       config:
         # 留空 = 内置默认。下面只列出最常改的几项，完整字段见 README。
         #
-        # 出口：Gotify 网关。url/token 建议用环境变量注入，避免把凭据写进仓库：
-        #   DSH_QQ_NOTIFY_GOTIFY_URL / DSH_QQ_NOTIFY_GOTIFY_TOKEN
+        # 出口：Gotify 网关。网关地址可写 '${VAR}'（投递前展开）；token 是只写密钥，
+        # 只认字面量，不做 ${ENV} 插值。想把 token 放在环境变量里，用 targets[].tokenEnv：
+        #   targets:
+        #     - name: qq-home
+        #       url: 'https://notify.example.com'
+        #       tokenEnv: DSH_GOTIFY_TOKEN
         transport: gotify
-        # 密钥可以不落盘：'${VAR}' 在投递前从环境变量展开（也支持 targets[].tokenEnv），
-        # 或整段用 DSH_QQ_NOTIFY_GOTIFY_URL / DSH_QQ_NOTIFY_GOTIFY_TOKEN 覆盖。
+        # token 从 Gotify 直接复制；全角标点（。）、大写前缀或漏掉的点会在投递前自动纠正。
         # 先只记日志：确认能收到再改成 false（或在 profile patch 里覆盖）。
         dryRun: true
         # 设备名留空 = 自动取主机名；deviceLabel 是渲染到 {device} 的显示名。

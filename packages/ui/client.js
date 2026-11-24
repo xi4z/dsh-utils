@@ -45,7 +45,7 @@ window.__ModuleLoader__.load({
     const APPROVAL_FIELDS = [
       { key: 'origins', label: '门控来源', kind: 'origins', hint: '判定为无人值守的来源；“全部审批”是显式全门控。' },
       { key: 'sessions', label: '点名会话', kind: 'lines', hint: '按 agent id 的 glob 点名，命中即门控该会话所有轮次；每行一个。' },
-      { key: 'windowSeconds', label: '应答窗口（秒）', kind: 'number', min: 0, max: 86400, hint: '0 = 立即拒绝且不询问下游。' },
+      { key: 'windowSeconds', label: '应答窗口（秒）', kind: 'number', min: 0, max: 86400, hint: '0 = 立即拒绝且不询问下游；到期落定时，仍挂着的审批卡片会被一起撤回。' },
       { key: 'defaultOutcome', label: '超时落定值', kind: 'select', options: [['rejected', '拒绝（rejected）'], ['unavailable', '下游不可用（unavailable）']], hint: '没有“本次放行”这一档：无人值守的默认裁决必须 fail-closed。' },
       { key: 'defaultPermissionPreset', label: '新会话权限档', kind: 'text', hint: '留空跟随部署默认；auto = 实验性自动审批（需对应 bundle）。' },
       { key: 'autoReviewContent', label: '回传复核内容', kind: 'boolean', hint: '窗口拒绝的是自动审批发起的请求时，把复核内容附进模型读到的工具结果。' },
@@ -67,7 +67,7 @@ window.__ModuleLoader__.load({
         hint: '默认走公网 Gotify 网关：任何能上网的设备都能发，不依赖本机 NapCat。',
       },
       { key: 'gotifyUrl', label: '网关地址', kind: 'text', hint: '如 https://notify.example.com；配了 targets 后忽略这一项。' },
-      { key: 'gotifyToken', label: '网关 token', kind: 'text', hint: '该系列的 Gotify application token；敏感值建议走环境变量。' },
+      { key: 'gotifyToken', label: '网关 token', kind: 'text', hint: '该系列的 Gotify application token；只写密钥（保存后不回显）。直接从 Gotify 复制即可，全角标点、大写前缀和漏掉的点会自动纠正。' },
       { key: 'gotifyPriority', label: '默认优先级', kind: 'number', min: 0, hint: 'targets 没单独指定优先级时使用。' },
       { key: 'gotifyHeaders', label: '附加请求头', kind: 'json', empty: {}, hint: 'JSON 对象，用于反代 Basic Auth 等；X-Gotify-Key 始终以目标 token 为准。' },
       {

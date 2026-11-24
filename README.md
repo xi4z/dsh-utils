@@ -336,7 +336,7 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
 
 ## 组件二：无人值守审批门控
 
-挂宿主 `'approval/request'` waterfall 链首（`prepend`）。判定无人值守的请求先 `next()` 给下游：窗口内有人答，用人的答案；窗口耗尽，按 fail-closed 默认值落定，turn 立即结束，不长期挂起。交互会话不改变。
+挂宿主 `'approval/request'` waterfall 链首（`prepend`）。判定无人值守的请求先 `next()` 给下游：窗口内有人答，用人的答案；窗口耗尽，按 fail-closed 默认值落定，turn 立即结束，不长期挂起。**请求一旦落定就撤回仍未回答的提示**，不管是谁落定的：门控把自己的 controller 融进请求的 signal，窗口到期、下游（网页/ACP/自动审批）作答、或外部人类渠道通过 `approvalPolicyInfo.withdraw(request, outcome)` 报回答案时都会 abort，宿主随即取消那条转发的 Remote 请求，网页审批卡片和侧栏「等待审批」标记一起消失，不会堆成一片已经决定过的旧卡片。交互会话不改变。
 
 | 字段 | 默认 | 含义 |
 |---|---|---|
@@ -371,8 +371,11 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
        └─ 出卡（正文含「N 秒内未处理将自动拒绝」）
             ├─ 网页先答 / 门控到期 → POST settle ignored（静默关闭）
             └─ 点击 → relay ack(0) → 长轮询取到 clicked
+                 → 调 approvalPolicyInfo.withdraw(request, 结果) 关掉网页那张卡
                  → 回填 allowed-once / rejected → POST settle（默认静默，不发回执）
 ```
+
+门控到期时，本组件看到的是一次**撤回**（abort 原因 `UnattendedApprovalWindowExpired`）：卡片照旧静默关闭（settle `ignored`，原因 `auto-rejected`），但回给宿主的是门控自己的 fail-closed 结果——不会把这次「拒绝」记成 `cancelled`，模型读到的仍是拒绝。反向同理：网页先答时门控会以 `UnattendedApprovalSettledElsewhere` 撤回，本组件把卡片 settle 成 `answered-elsewhere` 并回填对方的结果。
 
 ### 配置
 
@@ -468,7 +471,7 @@ agent/status   →  running → idle 的边沿 = 整个任务结束
 | `deviceLabel` | `DSH_QQ_NOTIFY_DEVICE_LABEL` | 同 `deviceName` | 给人看的名字，用于 `{device}` 与标题前缀 |
 | `deviceInTitle` | — | `false` | `true` 时 Gotify 标题加 `[设备名]` 前缀 |
 | `gotifyUrl` | `DSH_QQ_NOTIFY_GOTIFY_URL` | `''` | 网关地址，如 `https://notify.example.com` |
-| `gotifyToken` | — | `''` | 该系列的 Gotify application token；**只写密钥**，显式填写，不回显、不插值 |
+| `gotifyToken` | — | `''` | 该系列的 Gotify application token；**只写密钥**，显式填写，不回显、不插值；全角标点/前缀大小写/漏点会自动纠正 |
 | `gotifyPriority` | — | `3` | 默认优先级，`targets` 未单独指定时用 |
 | `gotifyHeaders` | `DSH_QQ_NOTIFY_GOTIFY_HEADERS`（JSON） | `{}` | 追加请求头，用于反代 Basic Auth 等 |
 | `targets` | `DSH_QQ_NOTIFY_TARGETS`（JSON） | `[]` | 多目标列表；非空时不用 `gotifyUrl` / `gotifyToken` |
@@ -491,6 +494,10 @@ agent/status   →  running → idle 的边沿 = 整个任务结束
 ### 密钥：显式配置、只写不回显
 
 `gotifyToken` 声明为 schemastery 的 `role('secret')`：DSH 设置接口在把配置发给浏览器前会剥掉这个字段，只留下「是否已设置」；设置页因此只能覆盖，不能查看。运行时组件仍从 live config 读到真实值，配置写在 profile 的 `cordis.patch.yml` 或插件页里均可，且按字面量使用。
+
+`gotifyToken`（以及 `targets[].token`）在投递前会做一次**兜底**：去掉首尾空白、零宽字符和包裹引号，全角 ASCII 和中文标点转半角（`。`→`.`），`gtfya` / `gtfyc` 前缀转小写并补上漏掉的分隔点。修完仍有非 ASCII 字符的目标直接跳过并记 warning，不再让 `fetch` 在构造请求头时抛 `Cannot convert argument to a ByteString`。
+
+> token 只能从 Gotify 创建 application 时显示的那一次复制。`gotify.db` 的 `applications.token` 列存的是摘要而不是可用凭据，从数据库/备份里抄出来的值一律 401。
 
 其余字符串字段仍支持 `${NAME}` / `${NAME:-默认值}` 插值：`gotifyUrl`、`endpoint`、`token`、`targetId`、`gotifyHeaders` 的值，`targets[]` 的 `url` / `token`。
 

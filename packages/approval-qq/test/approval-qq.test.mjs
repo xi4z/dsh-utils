@@ -4,6 +4,7 @@ import {
   createAnswerer,
   deadlineLine,
   formatDuration,
+  gateWithdrawal,
   renderApprovalCard,
   resolveOptions,
   commandOf,
@@ -248,6 +249,86 @@ test('answerer: abort settles ignored and returns cancelled', async () => {
   controller.abort()
   assert.equal(await pending, 'cancelled')
   assert.equal(relay.calls.settle[0].body.reason, 'aborted')
+})
+
+test('gateWithdrawal: only the gate reasons count, and they stay distinguishable', () => {
+  const expired = new AbortController()
+  expired.abort(Object.assign(new Error('window expired'), { name: 'UnattendedApprovalWindowExpired' }))
+  assert.equal(gateWithdrawal(expired.signal), 'window')
+  const settled = new AbortController()
+  settled.abort(Object.assign(new Error('answered elsewhere'), { name: 'UnattendedApprovalSettledElsewhere' }))
+  assert.equal(gateWithdrawal(settled.signal), 'settled')
+  const cancelled = new AbortController()
+  cancelled.abort(new Error('turn cancelled'))
+  assert.equal(gateWithdrawal(cancelled.signal), undefined)
+  assert.equal(gateWithdrawal(undefined), undefined)
+})
+
+test('answerer: a gate deadline withdrawal reports the gate outcome, not a cancellation', async () => {
+  const relay = fakeRelay((askId, waitSeconds, signal) => new Promise((resolve) => {
+    signal?.addEventListener('abort', () => resolve({ state: 'pending' }), { once: true })
+  }))
+  const withdrawal = new AbortController()
+  const answerer = createAnswerer(deps(relay))
+  let settleGate
+  const downstream = new Promise((resolve) => { settleGate = resolve })
+  const pending = answerer(request({ signal: withdrawal.signal }), () => downstream)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(relay.calls.create.length, 1)
+  // the gate aborts its deadline exactly as its own fail-closed outcome lands
+  withdrawal.abort(Object.assign(new Error('window expired'), { name: 'UnattendedApprovalWindowExpired' }))
+  settleGate('rejected')
+  assert.equal(await pending, 'rejected')
+  assert.deepEqual(relay.calls.settle[0].body, { outcome: 'ignored', reason: 'auto-rejected' })
+})
+
+test('answerer: another surface answering is reported as answered-elsewhere', async () => {
+  const relay = fakeRelay((askId, waitSeconds, signal) => new Promise((resolve) => {
+    signal?.addEventListener('abort', () => resolve({ state: 'pending' }), { once: true })
+  }))
+  const withdrawal = new AbortController()
+  const answerer = createAnswerer(deps(relay))
+  let settleGate
+  const downstream = new Promise((resolve) => { settleGate = resolve })
+  const pending = answerer(request({ signal: withdrawal.signal }), () => downstream)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  withdrawal.abort(Object.assign(new Error('answered elsewhere'), { name: 'UnattendedApprovalSettledElsewhere' }))
+  settleGate('allowed-once')
+  assert.equal(await pending, 'allowed-once')
+  assert.deepEqual(relay.calls.settle[0].body, { outcome: 'ignored', reason: 'answered-elsewhere' })
+})
+
+test('answerer: a click withdraws the prompts still open on the other surfaces', async () => {
+  const relay = fakeRelay(() => ({ state: 'clicked', choice: 'allow' }))
+  const withdrawn = []
+  const answerer = createAnswerer(deps(relay, {
+    deps: {
+      policyInfo: () => ({
+        describe: () => ({ gated: true, windowMs: 60_000, defaultOutcome: 'rejected' }),
+        withdraw: (req, outcome) => { withdrawn.push({ request: req, outcome }); return true },
+      }),
+    },
+  }))
+  const req = request()
+  assert.equal(await answerer(req, never), 'allowed-once')
+  assert.deepEqual(withdrawn, [{ request: req, outcome: 'allowed-once' }])
+  assert.deepEqual(relay.calls.settle[0].body, { outcome: 'allowed-once', receipt: 'ALLOWED' })
+})
+
+test('answerer: a relay-closed card withdraws the prompts still open elsewhere', async () => {
+  const relay = fakeRelay(() => ({ state: 'closed' }))
+  const withdrawn = []
+  const answerer = createAnswerer(deps(relay, {
+    deps: {
+      policyInfo: () => ({
+        describe: () => ({ gated: true, windowMs: 60_000, defaultOutcome: 'rejected' }),
+        withdraw: (req, outcome) => { withdrawn.push({ request: req, outcome }); return true },
+      }),
+    },
+  }))
+  assert.equal(await answerer(request(), never), 'cancelled')
+  assert.deepEqual(withdrawn.map((entry) => entry.outcome), ['cancelled'])
+  assert.equal(relay.calls.settle.length, 0)
 })
 
 test('relay client: sends the shared key and maps the three states', async () => {

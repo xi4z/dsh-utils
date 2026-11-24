@@ -30,7 +30,14 @@
  *     through untouched — nothing to wait for);
  *   - the window expires → the configured fail-closed default settles the
  *     approval ('rejected'; 'unavailable' also allowed — 'allowed-once' is
- *     schema-forbidden). The turn proceeds denied instead of hanging;
+ *     schema-forbidden). The turn proceeds denied instead of hanging, AND the
+ *     request is withdrawn: the gate fuses a controller into the delegated
+ *     request's signal, so aborting it once the request settles cancels the
+ *     forwarded Remote prompt and the still-open Web GUI card / "awaiting
+ *     approval" badge disappear instead of piling up as decided requests.
+ *     Every settlement withdraws — the window default, a downstream answer
+ *     (Web GUI / ACP / auto approval), and an outside answer reported through
+ *     `ApprovalPolicyInfo.withdraw` (the QQ card click);
  *   - the request's abort signal resolves 'cancelled' upstream — the host
  *     races the signal itself; a late window expiry is simply ignored.
  *
@@ -238,29 +245,88 @@ export function describeGate(config, agent, sessionId) {
  * because no answerer produced it. A fast `decision` (including an instant
  * fail-closed 'unavailable' from an empty chain) passes through untouched;
  * only a pending decision races the timer.
+ *
+ * `external` is the third arm: an answer produced OUTSIDE the delegated chain
+ * (a human channel ahead of the gate — the QQ card — settles through
+ * {@link ApprovalPolicyInfo.withdraw}). It counts as a downstream answer, so
+ * the gate reports that outcome instead of abandoning the request to its own
+ * timer.
  */
-export async function raceGate(decision, windowMs, defaultOutcome) {
+export async function raceGate(decision, windowMs, defaultOutcome, external) {
     if (windowMs <= 0)
         return { outcome: defaultOutcome, settledBy: 'window' };
     // The window timer stays REF'd on purpose: an open window means the host
     // turn is still owed an outcome, so the process must not drain the event
     // loop before it settles. It is cleared as soon as the race settles
-    // (answer, rejection, or expiry) so a fast answer never leaves a stray
-    // timer holding the loop for the rest of the window.
+    // (answer, external answer, rejection, or expiry) so a fast answer never
+    // leaves a stray timer holding the loop for the rest of the window.
     let timer;
     try {
         const windowSettlement = new Promise((resolve) => {
             timer = setTimeout(() => resolve({ outcome: defaultOutcome, settledBy: 'window' }), windowMs);
         });
-        return await Promise.race([
+        const arms = [
             decision().then((outcome) => ({ outcome, settledBy: 'downstream' })),
             windowSettlement,
-        ]);
+        ];
+        if (external !== undefined) {
+            arms.push(external.then((outcome) => ({ outcome, settledBy: 'downstream' })));
+        }
+        return await Promise.race(arms);
     }
     finally {
         if (timer !== undefined)
             clearTimeout(timer);
     }
+}
+/**
+ * Name carried by the abort reason the gate uses to withdraw a prompt whose
+ * window expired. A human channel racing the same deadline (the QQ card
+ * answerer) matches this name to tell the gate's own fail-closed settlement
+ * apart from a cancelled turn. Kept as a literal in both components on
+ * purpose: they are independently published packages, and this name is the
+ * only contract between them.
+ */
+export const WINDOW_EXPIRED_ABORT = 'UnattendedApprovalWindowExpired';
+/** Abort reason that withdraws a pending prompt once the window expires. */
+export function windowExpiredReason() {
+    const error = new Error('The unattended approval window expired, so the pending approval request was withdrawn.');
+    error.name = WINDOW_EXPIRED_ABORT;
+    return error;
+}
+/**
+ * Name carried by the abort reason the gate uses when a request was settled
+ * somewhere else (a downstream answerer, another human channel through
+ * {@link ApprovalPolicyInfo.withdraw}) and the prompts still open on the
+ * remaining surfaces have to go away.
+ */
+export const SETTLED_ABORT = 'UnattendedApprovalSettledElsewhere';
+/** Abort reason that withdraws a prompt because the request was already settled. */
+export function settledElsewhereReason() {
+    const error = new Error('The approval request was already settled elsewhere, so this pending prompt was withdrawn.');
+    error.name = SETTLED_ABORT;
+    return error;
+}
+/**
+ * Make one delegated request withdrawable.
+ *
+ * A human surface (the Web GUI's forwarded Remote prompt) drops a pending
+ * request only when the Host cancels the Remote event, and the Host watches
+ * exactly the request signal it was handed. The caller's signal belongs to the
+ * turn — aborting it would cancel the tool call — so the gate fuses a
+ * controller it owns into it: aborts from the turn still propagate unchanged,
+ * while the gate gains a handle that withdraws the prompt at its deadline
+ * without cancelling anything.
+ *
+ * @param request - the borrowed waterfall request about to be delegated.
+ * @param withdraw - the gate-owned controller for this one request.
+ * @returns the fused signal now installed on the request.
+ */
+export function installWithdrawSignal(request, withdraw) {
+    const original = request.signal;
+    const fused = original === undefined ? withdraw.signal : AbortSignal.any([original, withdraw.signal]);
+    request.signal = fused;
+    return fused;
 }
 /** Whether an approval reason was raised by the experimental auto approval. */
 export function isAutoReviewAsk(reason) {
@@ -368,6 +434,13 @@ export function apply(ctx, config) {
     /** Window-rejected auto-review requests, keyed by tool-call id. */
     const pendingAutoReview = new Map();
     /**
+     * Withdrawal handle per delegated request. Keyed by the request object the
+     * waterfall hands every listener, so an answerer that settles the request
+     * outside the delegated chain (the QQ card) can end the prompts that other
+     * surfaces still show. Weak: a request that never settles cannot leak.
+     */
+    const withdrawals = new WeakMap();
+    /**
      * Publish the read-only policy view. The service is optional by design: a
      * composition without this component simply has no approvalPolicyInfo, and
      * a human channel then shows no countdown (there is no gate deadline).
@@ -375,6 +448,15 @@ export function apply(ctx, config) {
     const policyInfo = {
         describe(agent, sessionId) {
             return describeGate(cfgNow(), agent, sessionId);
+        },
+        withdraw(request, outcome) {
+            const held = withdrawals.get(request);
+            if (held === undefined)
+                return false;
+            withdrawals.delete(request);
+            held.withdraw.abort(settledElsewhereReason());
+            held.settle(outcome);
+            return true;
         },
     };
     const provideService = ctx.provide;
@@ -386,7 +468,29 @@ export function apply(ctx, config) {
         const sessionId = String(request.agent?.id ?? '');
         if (!shouldGate(cfg, sessionId, readFacts(request.agent)))
             return next();
-        const settlement = await raceGate(next, cfg.windowSeconds * 1000, cfg.defaultOutcome);
+        const windowMs = Math.max(0, cfg.windowSeconds * 1000);
+        // Only a delegated request owns a downstream prompt; a zero window denies
+        // without calling next(), so there is nothing to withdraw then.
+        const withdraw = windowMs > 0 ? new AbortController() : undefined;
+        let externalSettle;
+        const external = withdraw === undefined ? undefined : new Promise((resolve) => {
+            externalSettle = resolve;
+        });
+        if (withdraw !== undefined && externalSettle !== undefined) {
+            installWithdrawSignal(request, withdraw);
+            withdrawals.set(request, { withdraw, settle: externalSettle });
+        }
+        const settlement = await raceGate(next, windowMs, cfg.defaultOutcome, external);
+        if (withdraw !== undefined) {
+            // Whoever settled the request ends every prompt still showing it: the
+            // window's fail-closed default, a downstream answer (Web GUI, ACP, auto
+            // approval), and an outside answer routed through withdraw() all take
+            // the prompts left open on the OTHER surfaces away. A prompt kept alive
+            // after its decision is only a stale card on the user's panel, and a
+            // late click is discarded by the service.
+            withdrawals.delete(request);
+            withdraw.abort(settlement.settledBy === 'window' ? windowExpiredReason() : settledElsewhereReason());
+        }
         if (settlement.settledBy === 'window'
             && settlement.outcome === 'rejected'
             && cfg.autoReviewContent

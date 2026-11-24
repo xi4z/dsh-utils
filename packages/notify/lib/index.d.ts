@@ -187,6 +187,33 @@ interface Options {
  * target without a token instead of sending the literal reference.
  */
 export declare function expandEnv(value: unknown): string;
+/** One repaired token plus a human-readable list of what was changed. */
+export interface TokenRepair {
+    readonly value: string;
+    readonly notes: readonly string[];
+    readonly changed: boolean;
+}
+/**
+ * Repair a pasted token before it reaches an HTTP header.
+ *
+ * A full-width character (`。` left by a Chinese IME, `（`, `：`, …) cannot be
+ * encoded into a header at all: `fetch` throws `Cannot convert argument to a
+ * ByteString` before a single byte leaves the process, so every notification
+ * fails and only the server log explains why. Gateway tokens are ASCII, so this
+ * trims, drops invisible characters and wrapping quotes, converts full-width
+ * ASCII and CJK punctuation to their ASCII form, removes inner whitespace, and
+ * restores the scheme prefix (`gtfya` / `gtfyc`) to its canonical lower-case
+ * form with its separator dot. Whatever is still outside printable ASCII is
+ * reported by {@link tokenProblem} so delivery can skip that target with a
+ * clear warning instead of failing inside `fetch`.
+ */
+export declare function normalizeToken(raw: unknown): TokenRepair;
+/**
+ * The first reason this token cannot go into an HTTP header, or `undefined`
+ * when it is printable ASCII. The position and code point are enough to fix the
+ * paste without writing the secret itself into a log.
+ */
+export declare function tokenProblem(token: string): string | undefined;
 /** Keep only string/number request headers; ignore everything else. */
 export declare function normalizeHeaders(raw: unknown): Record<string, string>;
 /**

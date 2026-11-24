@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { apply, renderMessage, renderApprovalMessage, callAction, Config } from '../lib/index.js'
+import { apply, renderMessage, renderApprovalMessage, callAction, Config, normalizeToken, tokenProblem } from '../lib/index.js'
 
 /** Start a minimal OneBot 11 HTTP endpoint and record what it receives. */
 async function startMock() {
@@ -427,6 +427,68 @@ test('gotify transport sends the X-Gotify-Key header', async (t) => {
   ctx.emit('agent/status', { agent, status: 'idle' })
   await settle()
   assert.equal(mock.requests.length, 1)
+})
+
+test('a pasted token is repaired: IME punctuation, prefix case, missing dot', () => {
+  const repaired = normalizeToken('GTFYA。NpNrEmp_EAZqdwV0PAlAn5HUk5NMOOAxUxbF1GU-WCk')
+  assert.equal(repaired.value, 'gtfya.NpNrEmp_EAZqdwV0PAlAn5HUk5NMOOAxUxbF1GU-WCk')
+  assert.equal(repaired.changed, true)
+  assert.equal(tokenProblem(repaired.value), undefined)
+
+  assert.equal(normalizeToken('ｇｔｆｙａ．ａｂｃ１２３').value, 'gtfya.abc123')
+  assert.equal(normalizeToken('  "gtfya.abc\u200b"  ').value, 'gtfya.abc')
+  assert.equal(normalizeToken('gtfyaabc123').value, 'gtfya.abc123')
+  assert.deepEqual(normalizeToken('gtfya.abc123'), { value: 'gtfya.abc123', notes: [], changed: false })
+  // An unrelated scheme is left alone.
+  assert.equal(normalizeToken('A.abcdef').value, 'A.abcdef')
+})
+
+test('gotify delivery repairs a full-width token before sending', async (t) => {
+  const mock = await startMock()
+  t.after(() => mock.close())
+  const agent = { id: 'sess-token-repair', session: { header: { cwd: '/root/core' } } }
+  const ctx = fakeContext([agent])
+  apply(ctx, {
+    enabled: true,
+    transport: 'gotify',
+    gotifyUrl: `http://127.0.0.1:${mock.port}`,
+    gotifyToken: 'GTFYA。NpNrEmp_EAZqdwV0PAlAn5HUk5NMOOAxUxbF1GU-WCk',
+    dryRun: false,
+    timeoutMs: 3000,
+  })
+  ctx.emit('session/event', { id: 'sess-token-repair' }, { type: 'turn/start', data: { turn: 1 } })
+  ctx.emit('session/event', { id: 'sess-token-repair' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  ctx.emit('agent/status', { agent, status: 'idle' })
+  await settle()
+
+  assert.equal(mock.requests.length, 1)
+  assert.equal(
+    mock.requests[0].headers['x-gotify-key'],
+    'gtfya.NpNrEmp_EAZqdwV0PAlAn5HUk5NMOOAxUxbF1GU-WCk',
+  )
+  assert.ok(ctx.logs.some(([level, line]) => level === 'warn' && line.includes('repaired token for target "default"')))
+})
+
+test('a token that is still not printable ASCII is skipped with a warning', async (t) => {
+  const mock = await startMock()
+  t.after(() => mock.close())
+  const agent = { id: 'sess-token-bad', session: { header: {} } }
+  const ctx = fakeContext([agent])
+  apply(ctx, {
+    enabled: true,
+    transport: 'gotify',
+    gotifyUrl: `http://127.0.0.1:${mock.port}`,
+    gotifyToken: 'gtfya．α',
+    dryRun: false,
+    timeoutMs: 3000,
+  })
+  ctx.emit('session/event', { id: 'sess-token-bad' }, { type: 'turn/start', data: { turn: 1 } })
+  ctx.emit('session/event', { id: 'sess-token-bad' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  ctx.emit('agent/status', { agent, status: 'idle' })
+  await settle()
+
+  assert.equal(mock.requests.length, 0)
+  assert.ok(ctx.logs.some(([level, line]) => level === 'warn' && line.includes('不是可打印 ASCII')))
 })
 
 test('ask_user_question tool call notifies after the debounce window', async (t) => {

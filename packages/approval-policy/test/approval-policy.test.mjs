@@ -6,6 +6,11 @@ import {
   shouldGate,
   describeGate,
   raceGate,
+  installWithdrawSignal,
+  windowExpiredReason,
+  settledElsewhereReason,
+  WINDOW_EXPIRED_ABORT,
+  SETTLED_ABORT,
   isAutoReviewAsk,
   recordAutoReviewSettle,
   takeAutoReviewSettle,
@@ -48,9 +53,11 @@ const event = (type) => ({ type })
 function fakeCtx({ services = {} } = {}) {
   const listeners = []
   const disposers = []
+  const provided = {}
   return {
     listeners,
     disposers,
+    provided,
     on(name, listener, options) {
       listeners.push({ name, listener, options })
       return () => true
@@ -58,10 +65,20 @@ function fakeCtx({ services = {} } = {}) {
     effect(disposer) {
       disposers.push(disposer)
     },
+    provide(name, value) {
+      provided[name] = value
+      return () => true
+    },
     get(name) {
       return services[name]
     },
   }
+}
+
+/** Run the effect factories the way cordis does, exposing the provided services. */
+function effectsRun(ctx) {
+  for (const factory of [...ctx.disposers]) factory()
+  return ctx.provided
 }
 
 function listenerOf(ctx, name) {
@@ -344,14 +361,15 @@ test('shouldPinDefaultPreset: fresh sessions only, and only when the host pin is
 
 // ------------------------------------------------------------------- apply --
 
-test('apply registers the gate, the result editor, and the default-preset pin, then disposes all three', () => {
+test('apply registers the policy service, the gate, the result editor, and the default-preset pin, then disposes all of them', () => {
   const ctx = fakeCtx()
   apply(ctx, refs())
   assert.equal(ctx.listeners.length, 3)
   assert.equal(listenerOf(ctx, 'approval/request').options?.prepend, true)
   assert.equal(listenerOf(ctx, 'tools/post-execute').options?.prepend, true)
   assert.equal(listenerOf(ctx, 'agent/created').options?.prepend, undefined)
-  assert.equal(ctx.disposers.length, 3)
+  // the service effect, the gate, the result editor, the pin
+  assert.equal(ctx.disposers.length, 4)
 })
 
 test('listener: an interactive turn delegates to next() untouched', async () => {
@@ -400,6 +418,116 @@ test('listener: a sessions-list hit gates even a human-driven turn', async () =>
   const { listener } = listenerOf(ctx, 'approval/request')
   const request = { agent: { id: 'night-runner', session: fakeSession({ messages: [userMsg('user')] }) } }
   assert.equal(await listener(request, async () => 'allowed-once'), 'rejected')
+})
+
+test('withdraw helpers: both abort reasons are identifiable and the caller signal still flows through', () => {
+  assert.equal(windowExpiredReason().name, WINDOW_EXPIRED_ABORT)
+  assert.equal(settledElsewhereReason().name, SETTLED_ABORT)
+  const caller = new AbortController()
+  const withdraw = new AbortController()
+  const request = { signal: caller.signal }
+  const fused = installWithdrawSignal(request, withdraw)
+  assert.equal(request.signal, fused)
+  assert.equal(fused.aborted, false)
+  caller.abort(new Error('turn cancelled'))
+  assert.equal(fused.aborted, true)
+})
+
+test('listener: window expiry withdraws the delegated prompt', async () => {
+  const ctx = fakeCtx()
+  apply(ctx, refs({ origins: ['all'], windowSeconds: 0.05 }))
+  const { listener } = listenerOf(ctx, 'approval/request')
+  const request = { agent: { id: 'root-1', session: fakeSession({ messages: [userMsg('schedule')] }) } }
+  let shown
+  const outcome = await listener(request, async () => {
+    shown = request.signal // the Web GUI answered chain now owns the prompt
+    return new Promise(() => {})
+  })
+  assert.equal(outcome, 'rejected')
+  assert.ok(shown instanceof AbortSignal)
+  assert.equal(shown.aborted, true)
+  assert.equal(shown.reason.name, WINDOW_EXPIRED_ABORT)
+})
+
+test('listener: a downstream answer withdraws the prompts left on the other surfaces', async () => {
+  const ctx = fakeCtx()
+  apply(ctx, refs({ origins: ['all'], windowSeconds: 60 }))
+  const { listener } = listenerOf(ctx, 'approval/request')
+  const request = { agent: { id: 'root-1', session: fakeSession({ messages: [userMsg('schedule')] }) } }
+  let shown
+  assert.equal(await listener(request, async () => { shown = request.signal; return 'allowed-once' }), 'allowed-once')
+  assert.ok(shown instanceof AbortSignal)
+  assert.equal(shown.aborted, true)
+  assert.equal(shown.reason.name, SETTLED_ABORT)
+})
+
+test('policyInfo.withdraw: settles the request from outside and ends the pending prompt', async () => {
+  const ctx = fakeCtx()
+  apply(ctx, refs({ origins: ['all'], windowSeconds: 60 }))
+  const info = effectsRun(ctx).approvalPolicyInfo
+  assert.equal(typeof info.withdraw, 'function')
+  const { listener } = listenerOf(ctx, 'approval/request')
+  const request = { agent: { id: 'root-1', session: fakeSession({ messages: [userMsg('schedule')] }) } }
+  let shown
+  const pending = listener(request, async () => { shown = request.signal; return new Promise(() => {}) })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(shown.aborted, false)
+  // an answerer outside the delegated chain (the QQ card) decided it
+  assert.equal(info.withdraw(request, 'allowed-once'), true)
+  assert.equal(shown.aborted, true)
+  assert.equal(shown.reason.name, SETTLED_ABORT)
+  // the outside answer wins the race instead of the gate's own window
+  assert.equal(await pending, 'allowed-once')
+  assert.equal(info.withdraw(request, 'allowed-once'), false) // already settled
+  assert.equal(info.withdraw({ agent: {} }, 'rejected'), false) // never held by the gate
+})
+
+test('listener: the caller signal still reaches the delegated prompt (turn cancellation)', async () => {
+  const ctx = fakeCtx()
+  apply(ctx, refs({ origins: ['all'], windowSeconds: 0.05 }))
+  const { listener } = listenerOf(ctx, 'approval/request')
+  const turn = new AbortController()
+  const reason = new Error('turn cancelled')
+  const request = {
+    agent: { id: 'root-1', session: fakeSession({ messages: [userMsg('schedule')] }) },
+    signal: turn.signal,
+  }
+  let shown
+  const pending = listener(request, async () => { shown = request.signal; return new Promise(() => {}) })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.notEqual(shown, turn.signal)
+  assert.equal(shown.aborted, false)
+  turn.abort(reason)
+  assert.equal(shown.reason, reason)
+  // the window still settles the gate once the turn's own abort is observed
+  assert.equal(await pending, 'rejected')
+})
+
+test('listener: a downstream rejected BY the withdrawal does not disturb the settlement', async () => {
+  const ctx = fakeCtx()
+  apply(ctx, refs({ origins: ['all'], windowSeconds: 0.03 }))
+  const { listener } = listenerOf(ctx, 'approval/request')
+  const request = { agent: { id: 'root-1', session: fakeSession({ messages: [userMsg('schedule')] }) } }
+  // Mirrors the Host gateway: cancelling the forwarded prompt rejects the
+  // downstream answerer, long after the gate already returned its outcome.
+  const outcome = await listener(request, () => new Promise((_, reject) => {
+    request.signal?.addEventListener('abort', () => reject(request.signal.reason), { once: true })
+  }))
+  assert.equal(outcome, 'rejected')
+  await new Promise((resolve) => setTimeout(resolve, 20)) // no unhandled rejection
+})
+
+test('listener: a zero window never installs a withdraw signal', async () => {
+  const ctx = fakeCtx()
+  apply(ctx, refs({ origins: ['all'], windowSeconds: 0 }))
+  const { listener } = listenerOf(ctx, 'approval/request')
+  const turn = new AbortController()
+  const request = {
+    agent: { id: 'root-1', session: fakeSession({ messages: [userMsg('schedule')] }) },
+    signal: turn.signal,
+  }
+  assert.equal(await listener(request, async () => 'allowed-once'), 'rejected')
+  assert.equal(request.signal, turn.signal)
 })
 
 test('auto review: a window rejection feeds the reviewer content into the tool result', async () => {

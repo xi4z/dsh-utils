@@ -16,8 +16,10 @@
  * gate's own window (approval-policy windowSeconds), which this component
  * reads through the approvalPolicyInfo service and echoes on the card:
  * "N seconds left, then auto-reject". When that window expires the gate
- * settles the request downstream, so this component closes the card silently
- * and later clicks do nothing.
+ * withdraws the request (its prompt abort), so this component closes the card
+ * silently and later clicks do nothing. The reverse direction uses the same
+ * service: a click calls `withdraw`, which ends the prompts still open on the
+ * other surfaces (the Web GUI card and its "awaiting approval" badge).
  *
  * The card is sent only after a short debounce: an auto-review decision inside
  * that window means no human is needed, so no card is sent at all.
@@ -285,6 +287,29 @@ async function waitForClick(relay, askId, cfg, signal, sleepFn) {
     }
 }
 /**
+ * Abort-reason names the unattended gate (`dsh-approval-policy`) carries when
+ * it withdraws a prompt. The policy component is an independent package, so
+ * these literals are the contract; keep the two in sync.
+ */
+const WINDOW_EXPIRED_ABORT = 'UnattendedApprovalWindowExpired';
+const SETTLED_ABORT = 'UnattendedApprovalSettledElsewhere';
+/**
+ * Which gate withdrawal the request signal reports, if any: `'window'` when the
+ * fail-closed deadline settled it, `'settled'` when another surface answered it.
+ * A cancelled turn reports neither (the caller's own signal is not renamed).
+ */
+export function gateWithdrawal(signal) {
+    const reason = signal?.reason;
+    if (typeof reason !== 'object' || reason === null)
+        return undefined;
+    const name = reason.name;
+    if (name === WINDOW_EXPIRED_ABORT)
+        return 'window';
+    if (name === SETTLED_ABORT)
+        return 'settled';
+    return undefined;
+}
+/**
  * Build the approval/request answerer.
  *
  * Flow: read the gate window -> call next() immediately (the GUI/downstream
@@ -385,12 +410,29 @@ export function createAnswerer(deps) {
                 return winner.outcome;
             }
             if (winner.kind === 'aborted') {
+                const withdrawal = gateWithdrawal(request.signal);
+                if (withdrawal !== undefined) {
+                    // The gate withdrew the prompt: either its deadline settled the
+                    // request fail-closed ('window') or another surface answered it
+                    // ('settled'). Neither is a cancelled turn, so report the
+                    // downstream outcome and settle the card accordingly. (This
+                    // listener sits ahead of the gate, so returning 'cancelled' here
+                    // would audit a decision as a cancellation.)
+                    const outcome = await downstream.catch(() => 'cancelled');
+                    await relay.settle(askId, {
+                        outcome: 'ignored',
+                        reason: withdrawal === 'window' ? 'auto-rejected' : 'answered-elsewhere',
+                    }).catch(() => { });
+                    return outcome;
+                }
                 await relay.settle(askId, { outcome: 'ignored', reason: 'aborted' }).catch(() => { });
                 return 'cancelled';
             }
             if (winner.kind === 'closed') {
                 // The relay closed the card without an honored click (restart/expiry race).
-                // Nothing to settle; treat the request as withdrawn.
+                // Nothing to settle; treat the request as withdrawn, and end the prompts
+                // the other surfaces still show for it.
+                deps.policyInfo?.()?.withdraw?.(request, 'cancelled');
                 return 'cancelled';
             }
             const outcome = winner.choice === 'allow' ? 'allowed-once' : 'rejected';
@@ -400,6 +442,10 @@ export function createAnswerer(deps) {
             }).catch((error) => {
                 deps.log?.warn('dsh-approval-qq: settle failed: ' + String(error?.message ?? error));
             });
+            // The click decided the request: close the prompts still open elsewhere
+            // (the Web GUI card, its "awaiting approval" badge). After the relay
+            // settle, so a failed settle leaves the other prompt alive to answer.
+            deps.policyInfo?.()?.withdraw?.(request, outcome);
             return outcome;
         }
         finally {

@@ -163,6 +163,96 @@ export function expandEnv(value) {
         return found !== '' ? found : (fallback ?? '');
     });
 }
+/** CJK punctuation an IME substitutes for the ASCII punctuation a token needs. */
+const CJK_PUNCTUATION = {
+    '。': '.',
+    '、': ',',
+    '，': ',',
+    '：': ':',
+    '；': ';',
+    '！': '!',
+    '？': '?',
+    '（': '(',
+    '）': ')',
+    '【': '[',
+    '】': ']',
+    '《': '<',
+    '》': '>',
+    '～': '~',
+    '－': '-',
+    '＿': '_',
+    '　': ' ',
+};
+/** Zero-width characters and BOMs that survive a copy-paste into the settings page. */
+const INVISIBLE_CHARS = /[\u200B-\u200D\u2060\uFEFF]/g;
+/** The gateway issues lower-case `gtfya.` (application) and `gtfyc.` (client) tokens. */
+const TOKEN_SCHEME = /^(gtfya|gtfyc)(\.?)([\s\S]+)$/i;
+/**
+ * Repair a pasted token before it reaches an HTTP header.
+ *
+ * A full-width character (`。` left by a Chinese IME, `（`, `：`, …) cannot be
+ * encoded into a header at all: `fetch` throws `Cannot convert argument to a
+ * ByteString` before a single byte leaves the process, so every notification
+ * fails and only the server log explains why. Gateway tokens are ASCII, so this
+ * trims, drops invisible characters and wrapping quotes, converts full-width
+ * ASCII and CJK punctuation to their ASCII form, removes inner whitespace, and
+ * restores the scheme prefix (`gtfya` / `gtfyc`) to its canonical lower-case
+ * form with its separator dot. Whatever is still outside printable ASCII is
+ * reported by {@link tokenProblem} so delivery can skip that target with a
+ * clear warning instead of failing inside `fetch`.
+ */
+export function normalizeToken(raw) {
+    const original = String(raw ?? '');
+    const notes = [];
+    let value = original.trim();
+    if (value !== original)
+        notes.push('去掉首尾空白');
+    const unquoted = value.replace(/^(['"`])([\s\S]*)\1$/, '$2');
+    if (unquoted !== value) {
+        notes.push('去掉包裹的引号');
+        value = unquoted;
+    }
+    const invisible = value.replace(INVISIBLE_CHARS, '');
+    if (invisible !== value) {
+        notes.push('去掉零宽字符');
+        value = invisible;
+    }
+    const halfwidth = invisible
+        .replace(/[\uFF01-\uFF5E]/g, (char) => String.fromCharCode((char.codePointAt(0) ?? 0) - 0xFEE0))
+        .replace(/[。、，：；！？（）【】《》～－＿　]/g, (char) => CJK_PUNCTUATION[char] ?? char);
+    if (halfwidth !== invisible)
+        notes.push('全角字符转半角');
+    const compact = halfwidth.replace(/\s+/g, '');
+    if (compact !== halfwidth)
+        notes.push('去掉内部空白');
+    let normalized = compact;
+    const scheme = TOKEN_SCHEME.exec(compact);
+    if (scheme) {
+        const prefix = scheme[1].toLowerCase();
+        if (prefix !== scheme[1])
+            notes.push('前缀转小写');
+        if (scheme[2] !== '.')
+            notes.push('补上缺失的前缀点');
+        normalized = `${prefix}.${scheme[3]}`;
+    }
+    return { value: normalized, notes, changed: normalized !== original };
+}
+/**
+ * The first reason this token cannot go into an HTTP header, or `undefined`
+ * when it is printable ASCII. The position and code point are enough to fix the
+ * paste without writing the secret itself into a log.
+ */
+export function tokenProblem(token) {
+    if (token === '')
+        return '为空';
+    for (const [index, char] of [...token].entries()) {
+        const code = char.codePointAt(0) ?? 0;
+        if (code < 0x21 || code > 0x7e) {
+            return `第 ${index + 1} 个字符是 U+${code.toString(16).toUpperCase().padStart(4, '0')}，不是可打印 ASCII`;
+        }
+    }
+    return undefined;
+}
 /** A finite number at or above `minimum`, or the fallback. */
 function num(value, fallback, minimum = 0) {
     const parsed = Number(value);
@@ -604,21 +694,37 @@ async function deliverViaGotify(ctx, cfg, payload, trace) {
 }
 /** Fire one Gotify POST at one target, retrying once on transient failure. */
 async function sendGotifyTarget(ctx, cfg, target, title, message, trace) {
+    // Repair IME punctuation before anything reaches `fetch`; a full-width
+    // character would throw inside header construction and surface as a generic
+    // delivery failure with no hint about the token.
+    const repair = normalizeToken(target.token);
+    if (repair.changed) {
+        ctx.logger.info(`dsh-notify: repaired token for target "${target.name}" (${repair.notes.join('；')})`);
+        trace('deliver', { mode: 'repair-token', target: target.name, notes: repair.notes });
+    }
+    const token = repair.value;
+    if (!target.url || !token) {
+        ctx.logger.warn(`dsh-notify: target "${target.name}" is missing url or token, skipping`);
+        trace('deliver', { mode: 'skip', why: 'target config missing', target: target.name });
+        return;
+    }
+    const problem = tokenProblem(token);
+    if (problem) {
+        ctx.logger.warn(`dsh-notify: target "${target.name}" token is unusable (${problem}); `
+            + 're-copy the series token from Gotify — delivery skipped');
+        trace('deliver', { mode: 'skip', why: 'token is not printable ASCII', target: target.name });
+        return;
+    }
     if (cfg.dryRun) {
         ctx.logger.info(`dsh-notify: dryRun, would POST gotify target=${target.name} url=${target.url} `
             + `device=${cfg.deviceLabel} ${JSON.stringify({ title, message, priority: target.priority })}`);
         trace('deliver', { mode: 'dryRun', transport: 'gotify', target: target.name, device: cfg.deviceLabel });
         return;
     }
-    if (!target.url || !target.token) {
-        ctx.logger.warn(`dsh-notify: target "${target.name}" is missing url or token, skipping`);
-        trace('deliver', { mode: 'skip', why: 'target config missing', target: target.name });
-        return;
-    }
     const url = `${target.url.replace(/\/+$/, '')}/message`;
     const body = { title, message, priority: target.priority };
     // Custom headers come first so the auth/content headers cannot be clobbered.
-    const headers = { ...cfg.gotifyHeaders, 'content-type': 'application/json', 'X-Gotify-Key': target.token };
+    const headers = { ...cfg.gotifyHeaders, 'content-type': 'application/json', 'X-Gotify-Key': token };
     for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
             const response = await fetch(url, {
@@ -713,6 +819,22 @@ export function apply(ctx, config = {}) {
         .join(',') || '<none>';
     logger.info(`dsh-notify: active (device=${initial.deviceLabel}, transport=${initial.transport}, targets=${targetSummary}, `
         + `reasons=${initial.notifyOnReasons.join(',')}, approval=${initial.notifyOnApproval}, dryRun=${initial.dryRun})`);
+    // Surface a repairable or unusable token at activation instead of waiting for
+    // the first notification to fail with an opaque error.
+    if (initial.transport === 'gotify') {
+        for (const target of initial.targets.filter((entry) => targetMatchesDevice(entry, initial))) {
+            const repair = normalizeToken(target.token);
+            if (repair.changed && repair.value !== '') {
+                logger.warn(`dsh-notify: repaired token for target "${target.name}" (${repair.notes.join('；')})`);
+            }
+            if (target.url === '')
+                continue;
+            const problem = tokenProblem(repair.value);
+            if (problem) {
+                logger.warn(`dsh-notify: target "${target.name}" token is unusable (${problem}); notifications will be skipped`);
+            }
+        }
+    }
     trace('activate', {
         deviceName: initial.deviceName,
         deviceLabel: initial.deviceLabel,

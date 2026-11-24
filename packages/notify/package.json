@@ -1,6 +1,6 @@
 {
   "name": "@xi4z/dsh-utils-notify",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "dsh-utils component: turn-end / approval / question notifications through a Gotify gateway, tagged with the device name.",
   "license": "MIT",
   "author": "xi4z",

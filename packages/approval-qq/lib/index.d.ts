@@ -91,6 +91,12 @@ export interface ApprovalPolicyInfo {
         windowMs: number;
         defaultOutcome: 'rejected' | 'unavailable';
     };
+    /**
+     * Settle the pending prompt of one gate-held request because this channel
+     * already decided it: the still-open prompts on the other surfaces go away,
+     * and the gate reports `outcome` instead of waiting out its window.
+     */
+    withdraw?(request: unknown, outcome: ApprovalOutcome): boolean;
 }
 /** Structural session/agent/request slices, mirroring dsh types without importing them. */
 interface SessionEventLike {
@@ -200,6 +206,14 @@ export interface AnswererDeps {
     /** Translate an English reason; undefined keeps the source text. */
     translate?: (text: string, budgetMs: number, signal?: AbortSignal) => Promise<string | undefined>;
 }
+/** Why the gate withdrew the prompt this answerer was racing. */
+export type GateWithdrawal = 'window' | 'settled';
+/**
+ * Which gate withdrawal the request signal reports, if any: `'window'` when the
+ * fail-closed deadline settled it, `'settled'` when another surface answered it.
+ * A cancelled turn reports neither (the caller's own signal is not renamed).
+ */
+export declare function gateWithdrawal(signal: AbortSignal | undefined): GateWithdrawal | undefined;
 /**
  * Build the approval/request answerer.
  *

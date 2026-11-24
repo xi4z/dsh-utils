@@ -88,6 +88,10 @@ bundle 方式（装好 `dsh-utils`）自动挂载，无需手写挂载块。
 - **审计宿主落**：`approval/asked` + `approval/decided` 由宿主写进会话日志，本组件不写日志，
   超时拒绝同样在 transcript 里可追溯。
 - **窗口内下游答了就用下游的答案**；空链瞬间 fail-closed `'unavailable'` 原样透传。
+- **落定即撤回未回答的提示**（窗口到期、下游作答、QQ 卡片作答都算）：门控把自己的 controller 融进请求 signal，落定即 abort，
+  宿主随即取消转发的 Remote 审批请求——网页卡片与侧栏「等待审批」一起消失，不会堆旧卡片；
+  迟到的点击被宿主丢弃。QQ 卡片那一侧作答时通过 `approvalPolicyInfo.withdraw(request, 结果)`
+  报回答案，同样会关掉网页卡片。`windowSeconds: 0` 不问下游，也就没有卡片可撤。
 - **turn 中止**由宿主信号竞速收 `'cancelled'`，迟到的窗口到期被忽略。
 - **新会话固定档只在新会话上生效**：恢复的、被 seed 的、用户手动切过档的会话保持原档。
 - **复核内容只在「窗口拒绝」时附加**：窗口内被人或其它 answerer 拒的请求不会附加；记录按
