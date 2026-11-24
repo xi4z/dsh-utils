@@ -49,7 +49,14 @@
  *     those sessions are shared with humans: only machine-driven turns
  *     gate, and a human steering afterwards (last provenance message =
  *     human — 'user', or a timed-ask late reply 'user-question-reply')
- *     keeps the interactive default.
+ *     keeps the interactive default;
+ *   - interactive: the complement of the machine origins — a HUMAN-driven
+ *     turn (last provenance message is 'user' / 'user-question-reply' and
+ *     the session is not a subagent) is gated too, so approvals raised
+ *     while an ordinary session is in progress get the same bounded window.
+ *     Reachable alone or composed with the machine origins (e.g.
+ *     [subagent, scheduled, interactive] ≈ everything but cron); 'all'
+ *     remains the blunt escape hatch that also covers unknown provenance.
  *
  * The listener registers with prepend: true — the gate sits ahead of the
  * interactive answerers (web remote answerer, dsh-feishu card) regardless of
@@ -75,7 +82,7 @@ import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval/types';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 export declare const name = "dsh-approval-policy";
 /** Origins a deployment may declare unattended (config vocabulary). */
-export type UnattendedOrigin = 'subagent' | 'scheduled' | 'cron' | 'all';
+export type UnattendedOrigin = 'subagent' | 'scheduled' | 'cron' | 'interactive' | 'all';
 /**
  * The only outcomes a gate may settle with. 'allowed-once' is deliberately
  * absent from this union AND from the config enum: an unattended default
@@ -105,8 +112,8 @@ declare module '@deepseek-ai/cordis' {
 }
 /** Settings-page schema; each key arrives as a volatile live reference. */
 export declare const Config: z<Schemastery.ObjectS<NoInfer<{
-    /** Session/turn origins treated as unattended. Default: subagent + scheduled. */
-    origins: z<NoInfer<("subagent" | "scheduled" | "cron" | "all")[]>, NoInfer<("subagent" | "scheduled" | "cron" | "all")[]>, "volatile-defined">;
+    /** Session/turn origins treated as unattended. Default: subagent + scheduled; 'interactive' also gates human-driven turns. */
+    origins: z<NoInfer<("subagent" | "scheduled" | "cron" | "interactive" | "all")[]>, NoInfer<("subagent" | "scheduled" | "cron" | "interactive" | "all")[]>, "volatile-defined">;
     /** Glob patterns matched against the requesting agent id; a hit gates every turn of that session. */
     sessions: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
     /** Answer window in seconds (whole seconds; no .int() chain exists — min/max bound it); 0 denies without delegating. Default 60. */
@@ -129,8 +136,8 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
      */
     autoReviewContent: z<boolean, boolean, "volatile-defined">;
 }>>, Schemastery.ObjectT<NoInfer<{
-    /** Session/turn origins treated as unattended. Default: subagent + scheduled. */
-    origins: z<NoInfer<("subagent" | "scheduled" | "cron" | "all")[]>, NoInfer<("subagent" | "scheduled" | "cron" | "all")[]>, "volatile-defined">;
+    /** Session/turn origins treated as unattended. Default: subagent + scheduled; 'interactive' also gates human-driven turns. */
+    origins: z<NoInfer<("subagent" | "scheduled" | "cron" | "interactive" | "all")[]>, NoInfer<("subagent" | "scheduled" | "cron" | "interactive" | "all")[]>, "volatile-defined">;
     /** Glob patterns matched against the requesting agent id; a hit gates every turn of that session. */
     sessions: z<NoInfer<string[]>, NoInfer<string[]>, "volatile-defined">;
     /** Answer window in seconds (whole seconds; no .int() chain exists — min/max bound it); 0 denies without delegating. Default 60. */

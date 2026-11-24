@@ -200,6 +200,25 @@ test('origins opt-ins: cron and all', () => {
   assert.equal(shouldGate({ ...DEFAULT, origins: ['all'] }, 's1', { lastUserMessageKind: 'user' }), true)
 })
 
+test('interactive gates human-driven turns only, and composes with the machine origins', () => {
+  const interactive = { ...DEFAULT, origins: ['interactive'] }
+  // A live session waiting on a human: last provenance message is the human.
+  assert.equal(shouldGate(interactive, 's1', { lastUserMessageKind: 'user' }), true)
+  // A timed question's late reply is still human provenance.
+  assert.equal(shouldGate(interactive, 's1', { lastUserMessageKind: 'user-question-reply' }), true)
+  // Machine-driven turns and subagents are NOT covered by 'interactive'.
+  assert.equal(shouldGate(interactive, 's1', { lastUserMessageKind: 'schedule' }), false)
+  assert.equal(shouldGate(interactive, 's1', { lastUserMessageKind: 'cron' }), false)
+  assert.equal(shouldGate(interactive, 's1', { headerOrigin: 'subagent', lastUserMessageKind: 'user' }), false)
+  // Unknown provenance stays ungated; 'all' remains the fail-closed escape hatch.
+  assert.equal(shouldGate(interactive, 's1', {}), false)
+  assert.equal(shouldGate({ ...DEFAULT, origins: ['all'] }, 's1', {}), true)
+  // Composed with the machine origins it behaves like 'all' minus unknown provenance.
+  const composed = { ...DEFAULT, origins: ['subagent', 'scheduled', 'interactive'] }
+  assert.equal(shouldGate(composed, 's1', { lastUserMessageKind: 'user' }), true)
+  assert.equal(shouldGate(composed, 's1', { lastUserMessageKind: 'cron' }), false)
+})
+
 test('sessions list: glob hit gates every turn even for humans; miss does not', () => {
   const cfg = { origins: ['subagent'], sessions: ['sched-*'] }
   assert.equal(shouldGate(cfg, 'sched-tasks-9', { lastUserMessageKind: 'user' }), true)

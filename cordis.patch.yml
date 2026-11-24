@@ -41,7 +41,7 @@
         # relay 的审批基地址（HTTPS 反代到 relay 的 /approval 端点），
         # 例如 https://notify.xiaz.work/_qq/approval。
         relayUrl: ''
-        # 与 relay 侧 approval.key 一致；建议用环境变量注入。
+        # relay 侧鉴权：relay 没配 approval.key 时复用 gotify.clientToken，这里填同一把。
         sharedKey: ''
         deviceLabel: ''
         # 自动裁决（auto review / GUI 抢答）落在防抖窗口内时不出卡。

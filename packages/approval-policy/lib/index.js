@@ -49,7 +49,14 @@
  *     those sessions are shared with humans: only machine-driven turns
  *     gate, and a human steering afterwards (last provenance message =
  *     human — 'user', or a timed-ask late reply 'user-question-reply')
- *     keeps the interactive default.
+ *     keeps the interactive default;
+ *   - interactive: the complement of the machine origins — a HUMAN-driven
+ *     turn (last provenance message is 'user' / 'user-question-reply' and
+ *     the session is not a subagent) is gated too, so approvals raised
+ *     while an ordinary session is in progress get the same bounded window.
+ *     Reachable alone or composed with the machine origins (e.g.
+ *     [subagent, scheduled, interactive] ≈ everything but cron); 'all'
+ *     remains the blunt escape hatch that also covers unknown provenance.
  *
  * The listener registers with prepend: true — the gate sits ahead of the
  * interactive answerers (web remote answerer, dsh-feishu card) regardless of
@@ -73,8 +80,8 @@ import z from '@deepseek-ai/schemastery';
 export const name = 'dsh-approval-policy';
 /** Settings-page schema; each key arrives as a volatile live reference. */
 export const Config = z.object({
-    /** Session/turn origins treated as unattended. Default: subagent + scheduled. */
-    origins: z.array(z.union(['subagent', 'scheduled', 'cron', 'all'])).default(['subagent', 'scheduled']).volatile(),
+    /** Session/turn origins treated as unattended. Default: subagent + scheduled; 'interactive' also gates human-driven turns. */
+    origins: z.array(z.union(['subagent', 'scheduled', 'cron', 'interactive', 'all'])).default(['subagent', 'scheduled']).volatile(),
     /** Glob patterns matched against the requesting agent id; a hit gates every turn of that session. */
     sessions: z.array(z.string()).default([]).volatile(),
     /** Answer window in seconds (whole seconds; no .int() chain exists — min/max bound it); 0 denies without delegating. Default 60. */
@@ -200,6 +207,13 @@ export function shouldGate(config, sessionId, facts) {
     if (kind === 'schedule' && origins.includes('scheduled'))
         return true;
     if (kind === 'cron' && origins.includes('cron'))
+        return true;
+    // 'interactive' is the complement of the machine origins: gate a turn only
+    // when both provenance reads positively say a human is driving it — a real
+    // user message and no subagent header. Unknown facts stay ungated (use
+    // 'all' for the fail-closed escape hatch).
+    if (origins.includes('interactive') && facts.headerOrigin !== 'subagent'
+        && (kind === 'user' || kind === 'user-question-reply'))
         return true;
     return false;
 }

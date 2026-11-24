@@ -340,14 +340,14 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
 
 | 字段 | 默认 | 含义 |
 |---|---|---|
-| `origins` | `[subagent, scheduled]` | 无人值守来源：`subagent` / `scheduled` / `cron` / `all` |
+| `origins` | `[subagent, scheduled]` | 无人值守来源：`subagent` / `scheduled` / `cron` / `interactive` / `all`；`interactive` = 人类驱动的 turn 也进窗口（会话进行中的审批） |
 | `sessions` | `[]` | 按 agent id 的 glob 点名会话，命中即门控该会话所有 turn |
 | `windowSeconds` | `60` | 应答窗口（秒）；`0` = 立即拒绝，不询问下游 |
 | `defaultOutcome` | `rejected` | 窗口到期落定值：`rejected` 或 `unavailable`。没有 `allowed-once` |
 | `defaultPermissionPreset` | `''` | 新会话权限档；`auto` 走实验性自动审批（要对应 bundle） |
 | `autoReviewContent` | `true` | 窗口拒绝自动审批的请求时，把复核内容附进模型读到的工具结果 |
 
-判定粒度：`sessions` 命中与 `all` 是会话级。`subagent` 看 `session.header.origin`。`scheduled` / `cron` 看最后一条带溯源 user 消息的 `source.kind`。合成注入（`runtime-context`、`skill-catalog`）跳过；人插过话就不门控。审计由宿主 `approval/asked` + `approval/decided` 写会话日志；本组件不写日志、不落盘。
+判定粒度：`sessions` 命中与 `all` 是会话级。`subagent` 看 `session.header.origin`。`scheduled` / `cron` 看最后一条带溯源 user 消息的 `source.kind`。合成注入（`runtime-context`、`skill-catalog`）跳过；默认人插过话就不门控。`interactive` 是机器来源的补集：最后一条溯源消息是 `user` / `user-question-reply` 且不是 subagent 时也门控——即**会话进行中的审批**同样有截止时间；它不覆盖未知溯源（那仍然只有 `all` 覆盖），可与机器来源组合（`[subagent, scheduled, interactive]` ≈ 除 cron 外全覆盖）。审计由宿主 `approval/asked` + `approval/decided` 写会话日志；本组件不写日志、不落盘。
 
 ## 组件三：QQ 审批卡片
 
@@ -380,7 +380,7 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
 |---|---|---|
 | `enabled` | `false` | 总开关；关闭时完全不碰 waterfall |
 | `relayUrl` | `''` | relay 审批基地址，以 `/approval` 结尾，如 `https://notify.xiaz.work/_qq/approval` |
-| `sharedKey` | `''` | 与 relay 的 `approval.key` 一致；**只写密钥**，显式填写，不回显、不插值 |
+| `sharedKey` | `''` | relay 侧鉴权：relay 没配 `approval.key` 时复用它的 `gotify.clientToken`，这里填同一把；**只写密钥**，显式填写，不回显、不插值 |
 | `deviceLabel` | 主机名 | 卡片上的设备名 |
 | `sendDelayMs` | `1200` | 发卡防抖；自动裁决落在此窗口内就不打扰 |
 | `pollWaitSeconds` | `25` | 长轮询窗口；点击到恢复通常 <1s |
@@ -398,7 +398,7 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
 
 ### relay 侧
 
-`config.json` 增加一段（键与 DSH 的 `sharedKey` 对齐）：
+`config.json` 增加一段（**不用再建单独密钥**）：
 
 ```json
 {
@@ -406,15 +406,17 @@ DSH 的预设除了目录版，还可能来自 Cordis 声明（随包内置的 `
     "enabled": true,
     "host": "127.0.0.1",
     "port": 8787,
-    "key": "与 sharedKey 相同的共享密钥",
     "route": "1"
   }
 }
 ```
 
+- 鉴权复用 relay 顶层已有的 `gotify.clientToken`：DSH 的 `sharedKey` 填同一把即可。
+  `approval.key` 仍可作为显式覆盖。
+
 - `route` 指向发卡的私聊系列（默认 `1`）；审批卡片只支持单聊。
 - relay 会额外连一条 QQ 机器人 WebSocket（只订阅 `INTERACTION`），与现有 Gotify 单向投递并行；同一 shard 只能有一个连接，所以不要再起第二个 relay 实例。
-- 端点：`POST /approval`、`GET /approval/{askId}?wait=N`、`POST /approval/{askId}/settle`、`GET /healthz`；鉴权头 `X-Approval-Key`。
+- 端点：`POST /approval`、`GET /approval/{askId}?wait=N`、`POST /approval/{askId}/settle`、`GET /healthz`；鉴权头 `X-Approval-Key` 或 `X-Gotify-Key`（同一把 token）。
 
 openresty 反代一条受保护路径：
 
