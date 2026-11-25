@@ -169,7 +169,7 @@ function skillSwitch(tree, name) {
 
 // ------------------------------------------------------------- host doubles --
 
-function fakeForm(initialValue, { status = 'ready', writable = true, revision = 7, setResult = true, onSet } = {}) {
+function fakeForm(initialValue, { status = 'ready', writable = true, revision = 7, setResult = true, onSet, user, base } = {}) {
   const calls = []
   const writes = []
   const listeners = new Set()
@@ -177,7 +177,7 @@ function fakeForm(initialValue, { status = 'ready', writable = true, revision = 
   const form = {
     calls,
     writes,
-    getSnapshot: () => ({ status, writable, value, revision }),
+    getSnapshot: () => ({ status, writable, value, revision, user, base }),
     subscribe: (listener) => {
       listeners.add(listener)
       return () => { listeners.delete(listener) }
@@ -196,7 +196,11 @@ function fakeForm(initialValue, { status = 'ready', writable = true, revision = 
     mutate: async (ops, at) => {
       calls.push({ ops, revision: at })
       value = { ...value }
-      for (const op of ops) value[op.path[0]] = op.value
+      for (const op of ops) {
+        if (op.op === 'unset') delete value[op.path[0]]
+        else value[op.path[0]] = op.value
+      }
+      for (const listener of listeners) listener()
       return true
     },
     dispose: () => {},
@@ -231,7 +235,7 @@ const NOTIFY_VALUE = {
   approvalTemplate: '',
 }
 
-function fakeCtx({ served = ['dsh-approval-policy', 'dsh-notify', 'utils-agents'], agentsValue, approvalValue, notifyValue, agentsOptions, skillOptions, panelOptions, workbenchOptions } = {}) {
+function fakeCtx({ served = ['dsh-approval-policy', 'dsh-notify', 'utils-agents'], agentsValue, approvalValue, notifyValue, agentsOptions, approvalOptions, notifyOptions, skillOptions, panelOptions, workbenchOptions } = {}) {
   const agentsForm = fakeForm(agentsValue ?? {
     minDepth: 1,
     maxDepth: 8,
@@ -259,8 +263,8 @@ function fakeCtx({ served = ['dsh-approval-policy', 'dsh-notify', 'utils-agents'
     defaultOutcome: 'rejected',
     defaultPermissionPreset: 'auto',
     autoReviewContent: true,
-  })
-  const notifyForm = fakeForm(notifyValue === undefined ? { ...NOTIFY_VALUE } : notifyValue)
+  }, approvalOptions)
+  const notifyForm = fakeForm(notifyValue === undefined ? { ...NOTIFY_VALUE } : notifyValue, notifyOptions)
   const registrations = []
   const tabTypes = []
   const effects = []
@@ -462,6 +466,38 @@ test('approval page: the schema bounds are enforced before the Host sees the wri
 
   assert.equal(approvalForm.calls.length, 0)
   assert.equal(textOf(tree).includes('不得大于 86400'), true)
+})
+
+test('approval page: 恢复默认 unsets exactly the user-overridden fields of this section', async () => {
+  const { registrations, approvalForm } = await mountClient({
+    approvalOptions: { user: { windowSeconds: 300, autoReviewContent: true } },
+  })
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-approval-policy').component
+
+  let tree = render(createElement(page, {}))
+  const [reset] = collect(tree, (node) => node.type === 'button' && textOf(node) === '恢复默认')
+  assert.ok(reset, 'a reset button is rendered')
+  assert.equal(reset.props.disabled, false)
+
+  await reset.props.onClick()
+  tree = render(createElement(page, {}))
+
+  assert.deepEqual(approvalForm.calls[0].ops, [
+    { op: 'unset', path: ['windowSeconds'] },
+    { op: 'unset', path: ['autoReviewContent'] },
+  ])
+  assert.equal(approvalForm.calls[0].revision, 7)
+  assert.match(textOf(tree), /已恢复默认设置/)
+})
+
+test('approval page: 恢复默认 is disabled when the section has no user overrides', async () => {
+  const { registrations } = await mountClient()
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-approval-policy').component
+
+  const tree = render(createElement(page, {}))
+  const [reset] = collect(tree, (node) => node.type === 'button' && textOf(node) === '恢复默认')
+  assert.ok(reset, 'a reset button is rendered')
+  assert.equal(reset.props.disabled, true)
 })
 
 test('an unwritable form renders read-only and cannot save', async () => {
@@ -804,6 +840,44 @@ test('skills panel: an empty catalog says so instead of rendering a bare list', 
   })
   try {
     assert.match(textOf(tree), /当前没有可读取的技能/)
+  } finally {
+    clearPanelGlobals()
+  }
+})
+
+const MANY_SKILLS = Array.from({ length: 9 }, (_, index) => ({
+  name: 'bulk-skill-' + (index + 1),
+  description: '批量技能',
+  source: 'user-dsh',
+  provider: 'filesystem',
+  path: '/root/core/skills/bulk-skill-' + (index + 1) + '/SKILL.md',
+  modelInvocable: true,
+  userInvocable: true,
+  enabled: true,
+}))
+
+test('skills panel: a long catalog starts folded so the config sections stay reachable', async () => {
+  const { tree: initial, page, props } = await mountSidebarPanel({
+    body: { ...PANEL_BODY, skills: MANY_SKILLS },
+  })
+  try {
+    let tree = initial
+    assert.match(textOf(tree), /共 9 个 · 模型可见 9/)
+    assert.equal(textOf(tree).includes('bulk-skill-1'), false, 'the folded list renders no rows')
+
+    const [toggle] = collect(tree, (node) => node.type === 'button' && node.props['aria-expanded'] === false)
+    assert.ok(toggle, 'a folded list offers an expand control')
+    assert.match(textOf(toggle), /展开（9）/)
+
+    toggle.props.onClick()
+    tree = await settle(page, props)
+    assert.equal(skillSwitch(tree, 'bulk-skill-1').props.checked, true)
+
+    const [collapse] = collect(tree, (node) => node.type === 'button' && node.props['aria-expanded'] === true)
+    assert.ok(collapse, 'an open list offers a collapse control')
+    collapse.props.onClick()
+    tree = await settle(page, props)
+    assert.equal(textOf(tree).includes('bulk-skill-1'), false, 'collapsing hides the rows again')
   } finally {
     clearPanelGlobals()
   }

@@ -29,6 +29,10 @@ window.__ModuleLoader__.load({
       ['all', '全部审批'],
     ]
 
+    // A catalog longer than this starts folded so the configuration sections
+    // below it stay reachable; short catalogs stay open.
+    const SKILL_AUTO_OPEN_LIMIT = 8
+
     const SKILL_FIELDS = [
       { key: 'minDepth', label: '最小深度', kind: 'number', min: 1, hint: '允许出现技能的第一个目录层级（相对技能根）。' },
       { key: 'maxDepth', label: '最大深度', kind: 'number', min: 1, hint: '最深扫描层级，不得小于最小深度。' },
@@ -121,9 +125,12 @@ window.__ModuleLoader__.load({
 .dsu-input:disabled { opacity: 0.6; }
 .dsu-textarea { resize: vertical; min-height: 68px; }
 .dsu-choices { display: flex; flex-wrap: wrap; gap: 12px; }
-.dsu-actions { display: flex; align-items: center; gap: 10px; }
+.dsu-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .dsu-save { padding: 6px 14px; border: 1px solid var(--dsw-alias-brand-primary); border-radius: 6px; background: transparent; color: var(--dsw-alias-brand-primary); font: inherit; cursor: pointer; }
 .dsu-save:disabled { opacity: 0.6; cursor: default; }
+.dsu-reset { padding: 6px 14px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; cursor: pointer; }
+.dsu-reset:hover:not(:disabled) { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
+.dsu-reset:disabled { opacity: 0.6; cursor: default; }
 .dsu-status { color: var(--dsw-alias-label-secondary); }
 .dsu-note { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; }
 .dsu-error { margin: 0; color: var(--dsw-alias-label-error, #d9534f); font-size: 12px; }
@@ -257,7 +264,16 @@ window.__ModuleLoader__.load({
       return code === '' || code === 'settings/rejected' ? message : `${message}（${code}）`
     }
 
-    /** One component's configuration section: fields, validation, save. */
+    /** Section fields that carry a user-layer override, in field order. */
+    function overriddenKeys(fields, snapshot) {
+      const user = snapshot?.user
+      if (user === null || typeof user !== 'object' || Array.isArray(user)) return []
+      return fields
+        .map((field) => field.key)
+        .filter((key) => Object.prototype.hasOwnProperty.call(user, key))
+    }
+
+    /** One component's configuration section: fields, validation, save, reset. */
     function Section({ form, fields, title, intro, ns, directMutate }) {
       const state = form.getSnapshot()
       const [draft, setDraft] = React.useState(() => toDraft(fields, state.value))
@@ -271,6 +287,7 @@ window.__ModuleLoader__.load({
       if (state.status === 'unavailable') return h('p', { className: 'dsu-note' }, '当前 dsh 版本没有向浏览器暴露这项配置。')
 
       const readOnly = state.writable !== true
+      const resetKeys = overriddenKeys(fields, state)
       const update = (key, value) => {
         setStatus('')
         setDraft((current) => ({ ...current, [key]: value }))
@@ -320,6 +337,55 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /** Show the values the Host now resolves after a reset, without waiting for a remount. */
+      const finishReset = (current, view) => {
+        const fresh = view ?? (typeof form.getSnapshot === 'function' ? form.getSnapshot() : null)
+        const base = fresh?.base ?? current?.base
+        const defaults = base !== null && typeof base === 'object' && !Array.isArray(base)
+          ? base
+          : fresh?.value ?? current?.value ?? state.value ?? {}
+        setDraft(toDraft(fields, defaults))
+        setStatus('已恢复默认设置')
+      }
+
+      // One click clears this section's user-layer overrides, so every field
+      // reverts to the deployment default. Only the fields the Host reports as
+      // overridden are sent; a field already at its default is untouched.
+      const reset = async () => {
+        if (readOnly || status === '保存中…' || status === '恢复中…') return
+        const current = typeof form.getSnapshot === 'function' ? form.getSnapshot() : state
+        const keys = overriddenKeys(fields, current)
+        if (keys.length === 0) {
+          setStatus('当前已是默认设置。')
+          return
+        }
+        const ops = keys.map((key) => ({ op: 'unset', path: [key] }))
+        setStatus('恢复中…')
+        try {
+          const revision = typeof current?.revision === 'number' ? current.revision : state.revision
+          if (typeof directMutate === 'function' && ns !== undefined) {
+            let response
+            try {
+              response = await directMutate(ns, ops, revision)
+            } catch (failure) {
+              setStatus('宿主拒绝了这次修改：' + messageOf(failure))
+              return
+            }
+            if (response !== null && typeof response === 'object' && response.ok === true) {
+              finishReset(current, response.value)
+              return
+            }
+            setStatus('宿主拒绝了这次修改：' + rejectionReason(response?.error))
+            return
+          }
+          const accepted = await form.mutate(ops, revision)
+          if (accepted) finishReset(current)
+          else setStatus('宿主拒绝了这次修改。')
+        } catch (error) {
+          setStatus(messageOf(error))
+        }
+      }
+
       return h('section', { className: 'dsu-section' }, [
         h('div', { className: 'dsu-sectionHead', key: 'head' }, [
           h('h4', { className: 'dsu-title', key: 'title' }, title),
@@ -331,6 +397,12 @@ window.__ModuleLoader__.load({
             className: 'dsu-save', key: 'save', type: 'button',
             disabled: readOnly || status === '保存中…', onClick: save,
           }, '保存'),
+          h('button', {
+            className: 'dsu-reset', key: 'reset', type: 'button',
+            title: resetKeys.length === 0 ? '本节没有用户覆盖的字段' : '清除本节 ' + resetKeys.length + ' 个字段的用户配置，回落到默认值',
+            disabled: readOnly || status === '保存中…' || status === '恢复中…' || resetKeys.length === 0,
+            onClick: reset,
+          }, '恢复默认'),
           status === '' ? null : h('span', { className: 'dsu-status', key: 'status', role: 'status' }, status),
         ]),
       ])
@@ -432,12 +504,14 @@ window.__ModuleLoader__.load({
 
     const PANEL_STYLE = `
 .dsp-root { display: grid; align-content: start; gap: 12px; box-sizing: border-box; height: 100%; padding: 12px; overflow: auto; color: var(--dsw-alias-label-primary); font-size: 13px; }
-.dsp-head { display: flex; align-items: center; gap: 8px; }
+.dsp-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .dsp-title { margin: 0; font-size: 14px; font-weight: 600; }
 .dsp-count { color: var(--dsw-alias-label-secondary); font-size: 12px; }
 .dsp-refresh { padding: 4px 10px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; cursor: pointer; }
 .dsp-refresh:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
 .dsp-refresh:disabled { opacity: 0.6; cursor: default; }
+.dsp-toggle { padding: 4px 10px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; cursor: pointer; }
+.dsp-toggle:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
 .dsp-note { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 1.5; }
 .dsp-list { display: grid; gap: 8px; }
 .dsp-item { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-base); }
@@ -551,6 +625,9 @@ window.__ModuleLoader__.load({
       const [disabled, setDisabled] = React.useState(() => formDisabled(form) ?? [])
       const [writing, setWriting] = React.useState('')
       const [saveError, setSaveError] = React.useState('')
+      // null until the first catalog arrives; the Host decides whether a short
+      // list opens by default, and a manual toggle wins from then on.
+      const [open, setOpen] = React.useState(null)
 
       // The form's snapshot is the source of truth for the switches: it changes
       // when the Host folds a write back, including the rollback after a refusal.
@@ -568,6 +645,7 @@ window.__ModuleLoader__.load({
           if (cancelled) return
           setSkills(result.skills)
           setMeta(result.body)
+          setOpen((current) => current === null ? result.skills.length > 0 && result.skills.length <= SKILL_AUTO_OPEN_LIMIT : current)
           // The Host's answer is only a fallback: while the config namespace is
           // served the form already carries the authoritative disabled list.
           if (formDisabled(form) === null) {
@@ -632,10 +710,17 @@ window.__ModuleLoader__.load({
       }
 
       const visible = skills.filter((skill) => skill.modelInvocable && !disabledSet.has(skill.name)).length
+      const expanded = open === true
       const children = [
         h('div', { className: 'dsp-head', key: 'head' }, [
           h('h3', { className: 'dsp-title', key: 'title' }, '技能'),
           status === 'ready' ? h('span', { className: 'dsp-count', key: 'count' }, '共 ' + skills.length + ' 个 · 模型可见 ' + visible) : null,
+          status === 'ready' && skills.length > 0 ? h('button', {
+            className: 'dsp-toggle', key: 'toggle', type: 'button',
+            'aria-expanded': expanded,
+            'aria-label': expanded ? '收起技能列表' : '展开技能列表',
+            onClick: () => setOpen(!expanded),
+          }, expanded ? '收起' : '展开（' + skills.length + '）') : null,
           h('button', {
             className: 'dsp-refresh', key: 'refresh', type: 'button',
             disabled: status === 'loading', onClick: reload,
@@ -666,7 +751,7 @@ window.__ModuleLoader__.load({
           h('p', { className: 'dsp-note', key: 'empty' }, '当前没有可读取的技能。'),
           h('p', { className: 'dsp-note', key: 'hint' }, '技能从用户级与项目级技能根发现；添加 SKILL.md 后点“刷新”。'),
         ]))
-      } else {
+      } else if (expanded) {
         children.push(h('div', { className: 'dsp-list', key: 'list' }, skills.map((skill) => {
           const enabled = !disabledSet.has(skill.name)
           const metaText = [skill.source, skill.provider].filter((part) => part !== '').join(' · ')
@@ -695,7 +780,9 @@ window.__ModuleLoader__.load({
       if (saveError !== '') {
         children.push(h('p', { className: 'dsp-error', key: 'saveError', role: 'status' }, saveError))
       }
-      children.push(h('p', { className: 'dsp-note', key: 'foot' }, '关闭后该技能不再出现在模型技能目录中，仍可用“/名称”手动加载。'))
+      if (expanded) {
+        children.push(h('p', { className: 'dsp-note', key: 'foot' }, '关闭后该技能不再出现在模型技能目录中，仍可用“/名称”手动加载。'))
+      }
       return h('div', { className: 'dsp-root' }, children)
     }
 

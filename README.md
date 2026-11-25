@@ -177,6 +177,8 @@ pnpm release --dry-run   # 只看会不会发，不动 registry
 
 配置页的「技能」开关列出当前会话能读到的 Skill：关掉 = 在 `ctx.skills.snapshot()` / `list()` 里把该技能标成 `modelInvocable: false`，模型下一轮拿到的 `<available_skills>` 里不再出现，手动 `/名称` 仍可加载。只能手动调用的技能显示「仅手动」，开关禁用。
 
+技能列表过长时默认折叠（超过 8 个），标题栏显示「共 N 个 · 模型可见 M」与「展开（N）」，展开后才能逐个开关；技能较少时自动展开。折叠只影响显示，不改任何开关。
+
 数据来源：`GET /api/dsh-utils/skill-panel/list`（Connection owner 认证）；带 `sessionId` 时用该会话的 cwd 与 preset skill 层，不带时用宿主默认工作目录。持久化在 `utils-agents` 命名空间的 `disabledSkills`（volatile，保存即生效）。这里只影响模型可见性，不改预设目录里的 `SKILL.md`；按预设开关技能在右侧栏面板的「技能」视图（重命名 `SKILL.md` / `SKILL.md.disabled`）。
 
 ### 面板：预设、技能仓库与 AGENTS.md
@@ -611,7 +613,7 @@ template: |
 
 宿主半侧只有一个空 `apply()`，`client.js` 提供全部界面。`packages/ui/package.json` 声明 `dsh.client` 并导出 `./client`；patch 的 `utils-ui` 行挂裸包名，DSH 的客户端扫描器因此把 `client.js` 挂在这一行。四个宿主行不声明 `dsh.client`。
 
-- 配置页：`plugins.row.config`，key 是 `@xi4z/dsh-utils#<行 id>`；utils-agents 一页含「递归技能发现 / 模型可见性 / 预设与技能仓库」三块，审批门控、QQ 审批卡片与通知各一页。
+- 配置页：`plugins.row.config`，key 是 `@xi4z/dsh-utils#<行 id>`；utils-agents 一页含「递归技能发现 / 模型可见性 / 预设与技能仓库」三块，审批门控、QQ 审批卡片与通知各一页。每个配置区的「保存」旁有「恢复默认」：一次点击只对本区 `user` 层出现过的字段发 `unset`，回落到宿主的 base／默认值；本节没有用户覆盖时按钮置灰。技能列表超过 8 个默认折叠，避免把下面的配置区挤下去。
 - 右侧栏：`sidebar.right.pane.tab` 的 `utils-agents` 面板，路由全部由 `@xi4z/dsh-utils-utils-agents` 提供。
 - 两套 Deploy Key 的保存/清除、技能仓库配置、版本检查与自动安装都在这个面板里。
 - 保存失败会带回宿主的真实原因：页面直接调 `settings.mutate`，把 `settings/conflict`（并显示两端的 revision）、`settings/rejected` 等失败原文显示在保存按钮旁；技能开关的总线同样显示原因后再还原。写失败后条目被重载或 revision 变化时，刷新页面再保存即可。
