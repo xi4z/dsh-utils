@@ -235,7 +235,7 @@ const NOTIFY_VALUE = {
   approvalTemplate: '',
 }
 
-function fakeCtx({ served = ['dsh-approval-policy', 'dsh-notify', 'utils-agents'], agentsValue, approvalValue, notifyValue, agentsOptions, approvalOptions, notifyOptions, skillOptions, panelOptions, workbenchOptions } = {}) {
+function fakeCtx({ served = ['dsh-approval-policy', 'dsh-notify', 'utils-agents'], agentsValue, approvalValue, notifyValue, agentsOptions, approvalOptions, notifyOptions, skillOptions, panelOptions, workbenchOptions, remote } = {}) {
   const agentsForm = fakeForm(agentsValue ?? {
     minDepth: 1,
     maxDepth: 8,
@@ -269,6 +269,7 @@ function fakeCtx({ served = ['dsh-approval-policy', 'dsh-notify', 'utils-agents'
   const tabTypes = []
   const effects = []
   const ctx = {
+    get: (key) => (key === 'remote' ? remote : undefined),
     configForms: {
       get: (namespace) => {
         if (namespace === 'utils-agents') return agentsForm
@@ -618,6 +619,116 @@ test('notify page: the dry-run switch and the text fields save as typed', async 
     { op: 'set', path: ['dryRun'], value: false },
     { op: 'set', path: ['gotifyUrl'], value: 'https://notify.example.org' },
   ])
+})
+
+test('notify page: a stored token reads as present without echoing its value', async () => {
+  const remote = {
+    settings: {
+      describe: async () => ({
+        ok: true,
+        value: { namespaces: [{ ns: 'dsh-notify', secrets: [{ path: ['gotifyToken'], set: true }] }] },
+      }),
+    },
+  }
+  const { registrations } = await mountClient({ remote })
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-notify').component
+
+  let tree = render(createElement(page, {}))
+  tree = await settle(page, {})
+
+  const input = fieldControl(tree, '网关 token')
+  assert.equal(input.props.type, 'password')
+  assert.equal(input.props.value, '', 'the actual secret never reaches the input')
+  const [status] = collect(tree, (node) => node.props?.['data-secret'] === 'gotifyToken')
+  assert.ok(status, 'the secret row carries a presence line')
+  assert.equal(status.props['data-set'], 'true')
+  assert.match(textOf(status), /当前已存在密钥/)
+  assert.doesNotMatch(textOf(tree), /gtfya\.example/)
+})
+
+test('notify page: token presence also distinguishes unset and unavailable', async () => {
+  const remote = {
+    settings: {
+      describe: async () => ({
+        ok: true,
+        value: { namespaces: [{ ns: 'dsh-notify', secrets: [{ path: ['gotifyToken'], set: false }] }] },
+      }),
+    },
+  }
+  const unset = await mountClient({ remote })
+  const unsetPage = unset.registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-notify').component
+  let tree = render(createElement(unsetPage, {}))
+  tree = await settle(unsetPage, {})
+  assert.match(textOf(collect(tree, (node) => node.props?.['data-secret'] === 'gotifyToken')[0]), /当前未设置密钥/)
+
+  const unavailable = await mountClient()
+  const unavailablePage = unavailable.registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-notify').component
+  tree = render(createElement(unavailablePage, {}))
+  assert.match(textOf(collect(tree, (node) => node.props?.['data-secret'] === 'gotifyToken')[0]), /密钥状态不可用/)
+})
+
+test('notify page: an empty token draft keeps the stored secret on save', async () => {
+  const { registrations, notifyForm } = await mountClient({
+    // Production answers redact the secret slot entirely, so the form value has no token.
+    notifyValue: { ...NOTIFY_VALUE, gotifyToken: undefined },
+  })
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-notify').component
+
+  let tree = render(createElement(page, {}))
+  checkbox(tree, '只记日志').props.onChange({ target: { checked: false } })
+  tree = render(createElement(page, {}))
+  await clickSave(tree)
+
+  assert.deepEqual(notifyForm.calls[0].ops, [{ op: 'set', path: ['dryRun'], value: false }])
+})
+
+test('notify page: saving a token flips the presence line without echoing the value', async () => {
+  let configured = false
+  const writes = []
+  const remote = {
+    settings: {
+      describe: async () => ({
+        ok: true,
+        value: { namespaces: [{ ns: 'dsh-notify', secrets: [{ path: ['gotifyToken'], set: configured }] }] },
+      }),
+      mutate: async (ns, ops) => {
+        writes.push({ ns, ops })
+        if (ops.some((op) => op.path?.[0] === 'gotifyToken' && op.op === 'set' && String(op.value).trim() !== '')) configured = true
+        return { ok: true, value: { ns, secrets: [{ path: ['gotifyToken'], set: configured }] } }
+      },
+    },
+  }
+  const { registrations, notifyForm } = await mountClient({ remote })
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-notify').component
+
+  let tree = render(createElement(page, {}))
+  tree = await settle(page, {})
+  const statusOf = (node) => collect(node, (entry) => entry.props?.['data-secret'] === 'gotifyToken')[0]
+  assert.match(textOf(statusOf(tree)), /当前未设置密钥/)
+
+  fieldControl(tree, '网关 token').props.onChange({ target: { value: 'fresh-token' } })
+  tree = render(createElement(page, {}))
+  await clickSave(tree)
+  tree = render(createElement(page, {}))
+
+  assert.equal(notifyForm.calls.length, 0, 'the Host API is written directly')
+  assert.deepEqual(writes, [{ ns: 'dsh-notify', ops: [{ op: 'set', path: ['gotifyToken'], value: 'fresh-token' }] }])
+  assert.match(textOf(statusOf(tree)), /当前已存在密钥/)
+  assert.equal(fieldControl(tree, '网关 token').props.value, '')
+})
+
+test('notify page: a typed token is written and the stored value is never restated', async () => {
+  const { registrations, notifyForm } = await mountClient({
+    notifyValue: { ...NOTIFY_VALUE, gotifyToken: undefined },
+  })
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-notify').component
+
+  let tree = render(createElement(page, {}))
+  fieldControl(tree, '网关 token').props.onChange({ target: { value: '  fresh-token  ' } })
+  tree = render(createElement(page, {}))
+  await clickSave(tree)
+
+  assert.deepEqual(notifyForm.calls[0].ops, [{ op: 'set', path: ['gotifyToken'], value: 'fresh-token' }])
 })
 
 // ----------------------------------------------------------------- skills --

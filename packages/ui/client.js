@@ -71,7 +71,7 @@ window.__ModuleLoader__.load({
         hint: '默认走公网 Gotify 网关：任何能上网的设备都能发，不依赖本机 NapCat。',
       },
       { key: 'gotifyUrl', label: '网关地址', kind: 'text', hint: '如 https://notify.example.com；配了 targets 后忽略这一项。' },
-      { key: 'gotifyToken', label: '网关 token', kind: 'text', hint: '该系列的 Gotify application token；只写密钥（保存后不回显）。直接从 Gotify 复制即可，全角标点、大写前缀和漏掉的点会自动纠正。' },
+      { key: 'gotifyToken', label: '网关 token', kind: 'secret', hint: '只写密钥：不回显实际值；页面上只显示是否已存在。留空保存保持现有密钥，填入新值则替换。直接从 Gotify 复制即可，全角标点、大写前缀和漏掉的点会自动纠正。' },
       { key: 'gotifyPriority', label: '默认优先级', kind: 'number', min: 0, hint: 'targets 没单独指定优先级时使用。' },
       { key: 'gotifyHeaders', label: '附加请求头', kind: 'json', empty: {}, hint: 'JSON 对象，用于反代 Basic Auth 等；X-Gotify-Key 始终以目标 token 为准。' },
       {
@@ -123,6 +123,8 @@ window.__ModuleLoader__.load({
 .dsu-input { width: 100%; box-sizing: border-box; padding: 6px 8px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px; font: inherit; }
 .dsu-input:focus { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 .dsu-input:disabled { opacity: 0.6; }
+.dsu-secretState { color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.dsu-secretState[data-set="true"] { color: var(--dsw-alias-state-success-primary); }
 .dsu-textarea { resize: vertical; min-height: 68px; }
 .dsu-choices { display: flex; flex-wrap: wrap; gap: 12px; }
 .dsu-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
@@ -169,6 +171,9 @@ window.__ModuleLoader__.load({
         else if (field.kind === 'lines') draft[field.key] = isList(current) ? current.join('\n') : ''
         else if (field.kind === 'json') {
           draft[field.key] = JSON.stringify(current === undefined ? (field.empty ?? {}) : current, null, 2)
+        } else if (field.kind === 'secret') {
+          // Only presence is known; never seed the input from any cached text.
+          draft[field.key] = ''
         } else if (field.kind === 'textarea') draft[field.key] = current === undefined ? '' : String(current)
         else draft[field.key] = current === undefined ? '' : String(current)
       }
@@ -207,6 +212,8 @@ window.__ModuleLoader__.load({
               throw new Error(`“${field.label}”不是合法 JSON。`)
             }
           }
+        } else if (field.kind === 'secret') {
+          next[field.key] = String(draft[field.key] ?? '').trim()
         } else if (field.kind === 'textarea') {
           next[field.key] = String(draft[field.key] ?? '')
         } else if (field.kind === 'select') {
@@ -232,6 +239,13 @@ window.__ModuleLoader__.load({
       for (const field of fields) {
         const before = current?.[field.key]
         const after = next[field.key]
+        if (field.kind === 'secret') {
+          // The Host never returns the secret itself, so an empty draft keeps
+          // the stored key instead of clearing it; only a typed value writes.
+          const text = String(after ?? '').trim()
+          if (text !== '') ops.push({ op: 'set', path: [field.key], value: text })
+          continue
+        }
         const changed = field.kind === 'json'
           ? stable(after) !== stable(before === undefined ? (field.empty ?? {}) : before)
           : field.kind === 'origins' || field.kind === 'checks' || field.kind === 'lines'
@@ -274,20 +288,48 @@ window.__ModuleLoader__.load({
     }
 
     /** One component's configuration section: fields, validation, save, reset. */
-    function Section({ form, fields, title, intro, ns, directMutate }) {
+    function Section({ form, fields, title, intro, ns, directMutate, describeSecrets }) {
       const state = form.getSnapshot()
       const [draft, setDraft] = React.useState(() => toDraft(fields, state.value))
       const [status, setStatus] = React.useState('')
+      const secretFields = fields.filter((field) => field.kind === 'secret')
+      const secretAvailable = secretFields.length > 0 && typeof describeSecrets === 'function'
+      // undefined = no secret channel, null = first read in flight, [] = read.
+      const [secrets, setSecrets] = React.useState(secretAvailable ? null : undefined)
 
       React.useEffect(() => {
         setDraft(toDraft(fields, state.value))
       }, [state.value])
+
+      React.useEffect(() => {
+        if (!secretAvailable) {
+          setSecrets(undefined)
+          return undefined
+        }
+        let cancelled = false
+        setSecrets(null)
+        describeSecrets(ns).then((rows) => {
+          if (!cancelled) setSecrets(Array.isArray(rows) ? rows : [])
+        }).catch(() => {
+          if (!cancelled) setSecrets(undefined)
+        })
+        return () => {
+          cancelled = true
+        }
+      }, [ns, describeSecrets, secretAvailable])
 
       if (state.status === 'loading') return h('p', { className: 'dsu-note' }, '正在读取配置…')
       if (state.status === 'unavailable') return h('p', { className: 'dsu-note' }, '当前 dsh 版本没有向浏览器暴露这项配置。')
 
       const readOnly = state.writable !== true
       const resetKeys = overriddenKeys(fields, state)
+      const secretFlags = {}
+      for (const field of secretFields) {
+        const found = Array.isArray(secrets)
+          ? secrets.find((row) => row !== null && typeof row === 'object' && Array.isArray(row.path) && row.path.length === 1 && row.path[0] === field.key)
+          : undefined
+        secretFlags[field.key] = secrets === undefined ? undefined : secrets === null ? null : found === undefined ? false : found.set === true
+      }
       const update = (key, value) => {
         setStatus('')
         setDraft((current) => ({ ...current, [key]: value }))
@@ -301,6 +343,30 @@ window.__ModuleLoader__.load({
           return { ...current, [key]: chosen }
         })
       }
+
+      /** Re-read the Host's secret sidecar (paths plus set flags, never values). */
+      const refreshSecrets = () => {
+        if (!secretAvailable) return
+        describeSecrets(ns).then((rows) => setSecrets(Array.isArray(rows) ? rows : [])).catch(() => setSecrets(undefined))
+      }
+
+      /** Drop a typed secret after its write so it never lingers in the page. */
+      const clearSecretDrafts = () => {
+        if (secretFields.length === 0) return
+        setDraft((current) => {
+          const next = { ...current }
+          for (const field of secretFields) next[field.key] = ''
+          return next
+        })
+      }
+
+      /** Fold a Host answer: refresh secret presence and clear typed secret text. */
+      const afterWrite = (view) => {
+        if (view !== null && typeof view === 'object' && Array.isArray(view.secrets)) setSecrets(view.secrets)
+        else refreshSecrets()
+        clearSecretDrafts()
+      }
+
       const save = async () => {
         setStatus('保存中…')
         try {
@@ -324,6 +390,7 @@ window.__ModuleLoader__.load({
               return
             }
             if (response !== null && typeof response === 'object' && response.ok === true) {
+              afterWrite(response.value)
               setStatus('已保存')
               return
             }
@@ -331,6 +398,7 @@ window.__ModuleLoader__.load({
             return
           }
           const accepted = await form.mutate(ops, revision)
+          if (accepted) afterWrite(null)
           setStatus(accepted ? '已保存' : '宿主拒绝了这次修改。')
         } catch (error) {
           setStatus(error instanceof Error ? error.message : String(error))
@@ -345,6 +413,7 @@ window.__ModuleLoader__.load({
           ? base
           : fresh?.value ?? current?.value ?? state.value ?? {}
         setDraft(toDraft(fields, defaults))
+        afterWrite(view)
         setStatus('已恢复默认设置')
       }
 
@@ -391,7 +460,7 @@ window.__ModuleLoader__.load({
           h('h4', { className: 'dsu-title', key: 'title' }, title),
           intro === undefined ? null : h('p', { className: 'dsu-hint', key: 'intro' }, intro),
         ]),
-        ...fields.map((field) => renderField(field, draft, readOnly, update, toggleOption)),
+        ...fields.map((field) => renderField(field, draft, readOnly, update, toggleOption, secretFlags)),
         h('div', { className: 'dsu-actions', key: 'actions' }, [
           h('button', {
             className: 'dsu-save', key: 'save', type: 'button',
@@ -409,8 +478,32 @@ window.__ModuleLoader__.load({
     }
 
     /** Render one field according to its kind. */
-    function renderField(field, draft, readOnly, update, toggleOption) {
+    function renderField(field, draft, readOnly, update, toggleOption, secretFlags) {
       const hint = field.hint === undefined ? null : h('span', { className: 'dsu-hint', key: 'hint' }, field.hint)
+      if (field.kind === 'secret') {
+        const configured = secretFlags?.[field.key]
+        const status = configured === undefined
+          ? '密钥状态不可用。'
+          : configured === null
+            ? '正在读取密钥状态…'
+            : configured === true
+              ? '当前已存在密钥（不回显）；留空保存保持现有密钥。'
+              : '当前未设置密钥。'
+        return h('label', { className: 'dsu-row', key: field.key }, [
+          h('span', { className: 'dsu-label', key: 'label' }, field.label),
+          h('input', {
+            className: 'dsu-input', key: 'input', type: 'password', autoComplete: 'new-password',
+            value: draft[field.key] ?? '', disabled: readOnly,
+            placeholder: configured === true ? '已保存；留空保持不变' : configured === false ? '未设置密钥' : '',
+            onChange: (event) => update(field.key, event.target.value),
+          }),
+          h('span', {
+            className: 'dsu-secretState', key: 'secret', role: 'status',
+            'data-secret': field.key, 'data-set': configured === true ? 'true' : configured === false ? 'false' : 'unknown',
+          }, status),
+          hint,
+        ])
+      }
       if (field.kind === 'boolean') {
         return h('label', { className: 'dsu-row dsu-check', key: field.key }, [
           h('input', {
@@ -2347,7 +2440,7 @@ window.__ModuleLoader__.load({
           h(Section, {
             key: 'section', form: config.form, fields: config.fields,
             title: config.title, intro: config.intro,
-            ns: config.ns, directMutate: config.directMutate,
+            ns: config.ns, directMutate: config.directMutate, describeSecrets: config.describeSecrets,
           }),
         ])
       }
@@ -2373,6 +2466,24 @@ window.__ModuleLoader__.load({
           return null
         }
       })()
+      // Secret presence only: the Host removes secret values before the wire and
+      // answers a sidecar of paths plus `set` flags, which is all the page shows.
+      const describeSecrets = (() => {
+        try {
+          const settings = remote === undefined || remote === null ? undefined : remote.settings
+          if (settings === undefined || settings === null || typeof settings.describe !== 'function') return null
+          return async (ns) => {
+            const response = await settings.describe()
+            if (response === null || typeof response !== 'object' || response.ok !== true) return null
+            const value = response.value
+            const namespaces = value !== null && typeof value === 'object' && Array.isArray(value.namespaces) ? value.namespaces : []
+            const view = namespaces.find((row) => row !== null && typeof row === 'object' && row.ns === ns)
+            return view !== null && view !== undefined && Array.isArray(view.secrets) ? view.secrets : []
+          }
+        } catch {
+          return null
+        }
+      })()
       const approvalForm = ctx.configForms.get(APPROVAL_NS)
       const notifyForm = ctx.configForms.get(NOTIFY_NS)
       let agentsForm = null
@@ -2387,12 +2498,12 @@ window.__ModuleLoader__.load({
         if (agentsForm) agentsForm.dispose()
       }, 'dsh-utils: configuration forms')
       const ApprovalRowPage = RowPage({
-        form: approvalForm, fields: APPROVAL_FIELDS, ns: APPROVAL_NS, directMutate,
+        form: approvalForm, fields: APPROVAL_FIELDS, ns: APPROVAL_NS, directMutate, describeSecrets,
         title: '无人值守审批门控',
         intro: '给 subagent／定时／cron 的审批请求设定应答窗口，超时按 fail-closed 落定。',
       })
       const NotifyRowPage = RowPage({
-        form: notifyForm, fields: NOTIFY_FIELDS, ns: NOTIFY_NS, directMutate,
+        form: notifyForm, fields: NOTIFY_FIELDS, ns: NOTIFY_NS, directMutate, describeSecrets,
         title: '会话通知',
         intro: '会话结束、等待回答或等待授权时推送一条消息；出口是 Gotify 网关，多台设备共用一个 QQ 也能分清是谁。',
       })
@@ -2402,7 +2513,7 @@ window.__ModuleLoader__.load({
         return h('div', { className: 'dsu-root' }, [
           h('style', { key: 'style' }, STYLE + PANEL_STYLE),
           h(Section, {
-            key: 'discovery', form: agentsForm, fields: SKILL_FIELDS, ns: AGENTS_NS, directMutate,
+            key: 'discovery', form: agentsForm, fields: SKILL_FIELDS, ns: AGENTS_NS, directMutate, describeSecrets,
             title: '递归技能发现',
             intro: '嵌套目录里的 SKILL.md 递归发现。改动即时生效，并写入 dsh 的配置文档。',
           }),
@@ -2410,7 +2521,7 @@ window.__ModuleLoader__.load({
             h(SkillPanel, { key: 'panel', form: agentsForm, ns: AGENTS_NS, directMutate }),
           ]),
           h(Section, {
-            key: 'agents', form: agentsForm, fields: AGENTS_FIELDS, ns: AGENTS_NS, directMutate,
+            key: 'agents', form: agentsForm, fields: AGENTS_FIELDS, ns: AGENTS_NS, directMutate, describeSecrets,
             title: '预设与技能仓库',
             intro: '右侧栏的 utils-agents 面板按预设统一管理 skills、技能仓库与 AGENTS.md。',
           }),

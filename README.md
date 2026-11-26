@@ -474,7 +474,7 @@ agent/status   →  running → idle 的边沿 = 整个任务结束
 | `deviceLabel` | `DSH_QQ_NOTIFY_DEVICE_LABEL` | 同 `deviceName` | 给人看的名字，用于 `{device}` 与标题前缀 |
 | `deviceInTitle` | — | `false` | `true` 时 Gotify 标题加 `[设备名]` 前缀 |
 | `gotifyUrl` | `DSH_QQ_NOTIFY_GOTIFY_URL` | `''` | 网关地址，如 `https://notify.example.com` |
-| `gotifyToken` | — | `''` | 该系列的 Gotify application token；**只写密钥**，显式填写，不回显、不插值；全角标点/前缀大小写/漏点会自动纠正 |
+| `gotifyToken` | — | `''` | 该系列的 Gotify application token；**只写密钥**，显式填写，不回显、不插值；设置页只显示是否已存在（留空保存保持不变）；全角标点/前缀大小写/漏点会自动纠正 |
 | `gotifyPriority` | — | `3` | 默认优先级，`targets` 未单独指定时用 |
 | `gotifyHeaders` | `DSH_QQ_NOTIFY_GOTIFY_HEADERS`（JSON） | `{}` | 追加请求头，用于反代 Basic Auth 等 |
 | `targets` | `DSH_QQ_NOTIFY_TARGETS`（JSON） | `[]` | 多目标列表；非空时不用 `gotifyUrl` / `gotifyToken` |
@@ -496,7 +496,7 @@ agent/status   →  running → idle 的边沿 = 整个任务结束
 
 ### 密钥：显式配置、只写不回显
 
-`gotifyToken` 声明为 schemastery 的 `role('secret')`：DSH 设置接口在把配置发给浏览器前会剥掉这个字段，只留下「是否已设置」；设置页因此只能覆盖，不能查看。运行时组件仍从 live config 读到真实值，配置写在 profile 的 `cordis.patch.yml` 或插件页里均可，且按字面量使用。
+`gotifyToken` 声明为 schemastery 的 `role('secret')`：DSH 设置接口在把配置发给浏览器前会剥掉实际值，只留下「是否已设置」；设置页因此不回显 token，只显示「当前已存在密钥 / 当前未设置密钥」，输入框留空保存会保持现有密钥，填入新值才替换。空字符串在 schema 层归一为「未设置」，所以这个状态不会因为默认空值而误报。运行时组件仍从 live config 读到真实值，配置写在 profile 的 `cordis.patch.yml` 或插件页里均可，且按字面量使用。
 
 `gotifyToken`（以及 `targets[].token`）在投递前会做一次**兜底**：去掉首尾空白、零宽字符和包裹引号，全角 ASCII 和中文标点转半角（`。`→`.`），`gtfya` / `gtfyc` 前缀转小写并补上漏掉的分隔点。修完仍有非 ASCII 字符的目标直接跳过并记 warning，不再让 `fetch` 在构造请求头时抛 `Cannot convert argument to a ByteString`。
 

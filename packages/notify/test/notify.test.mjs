@@ -862,6 +862,13 @@ test('gotifyToken is a write-only secret in the settings schema', () => {
   assert.equal(field.meta.role, 'secret')
 })
 
+test('an empty gotifyToken resolves as unset so the browser can report presence truthfully', () => {
+  assert.equal(Config({}).gotifyToken?.get?.(), undefined)
+  assert.equal(Config({ gotifyToken: '' }).gotifyToken?.get?.(), undefined)
+  assert.equal(Config({ gotifyToken: '   ' }).gotifyToken?.get?.(), undefined)
+  assert.equal(Config({ gotifyToken: 'gtfya.test' }).gotifyToken?.get?.(), 'gtfya.test')
+})
+
 test('per-target urlEnv/tokenEnv name the variables and ${ENV:-fallback} keeps a default', async (t) => {
   const mock = await startMock()
   t.after(() => mock.close())

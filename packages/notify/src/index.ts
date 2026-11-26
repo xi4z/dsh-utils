@@ -129,7 +129,10 @@ export const Config = z.object({
   targetType: z.union(['private', 'group']).default(DEFAULTS.targetType).description('Legacy OneBot recipient kind.').volatile(),
   targetId: z.string().default(DEFAULTS.targetId).description('Legacy OneBot recipient id.').volatile(),
   gotifyUrl: z.string().default(DEFAULTS.gotifyUrl).description('Gotify gateway base URL.').volatile(),
-  gotifyToken: z.string().default(DEFAULTS.gotifyToken).role('secret').description('Gotify application token. Write-only secret: editable in settings, never returned to the browser; configure it explicitly (no env interpolation).').volatile(),
+  // Empty means unset: the transform keeps a blank token out of the resolved
+  // config, so the settings redaction sidecar reports "not configured" instead
+  // of treating the schema's empty-string default as a filled-in secret.
+  gotifyToken: z.transform(z.string(), (value: string) => value.trim() === '' ? undefined : value).role('secret').description('Gotify application token. Write-only secret: editable in settings, never returned to the browser; configure it explicitly (no env interpolation).').volatile(),
   gotifyPriority: z.natural().default(DEFAULTS.gotifyPriority).description('Default message priority.').volatile(),
   gotifyHeaders: z.any().default({}).description('Extra request headers for the gateway.').volatile(),
   targets: z.any().default([]).description('Multiple gateway targets; supports ${ENV} in url/token and urlEnv/tokenEnv.').volatile(),

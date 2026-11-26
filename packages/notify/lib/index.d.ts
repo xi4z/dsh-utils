@@ -65,7 +65,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     targetType: z<"private" | "group", "private" | "group", "volatile-defined">;
     targetId: z<string, string, "volatile-defined">;
     gotifyUrl: z<string, string, "volatile-defined">;
-    gotifyToken: z<string, string, "volatile-defined">;
+    gotifyToken: z<string, string | undefined, "volatile">;
     gotifyPriority: z<number, number, "volatile-defined">;
     gotifyHeaders: z<any, any, "volatile-defined">;
     targets: z<any, any, "volatile-defined">;
@@ -93,7 +93,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     targetType: z<"private" | "group", "private" | "group", "volatile-defined">;
     targetId: z<string, string, "volatile-defined">;
     gotifyUrl: z<string, string, "volatile-defined">;
-    gotifyToken: z<string, string, "volatile-defined">;
+    gotifyToken: z<string, string | undefined, "volatile">;
     gotifyPriority: z<number, number, "volatile-defined">;
     gotifyHeaders: z<any, any, "volatile-defined">;
     targets: z<any, any, "volatile-defined">;
