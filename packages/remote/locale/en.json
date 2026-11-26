@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Reverse-proxy entry",
+    "description": "A loopback reverse proxy that rewrites Host/Origin to loopback before forwarding to the DSH Web server, so an operator-owned tunnel can publish the GUI. On a desktop profile it keeps the stock desktop UI and lets the Host bootstrap the first authentication."
+  }
+}

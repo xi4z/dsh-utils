@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "反向代理入口",
+    "description": "在本机回环端口上起一个反向代理：把 Host/Origin 改写成回环后转发给 DSH Web，让自备隧道可以把界面发布出去。desktop profile 下保持原版桌面界面，并由宿主自身完成首次鉴权。"
+  }
+}

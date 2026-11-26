@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Harness 工具集",
-    "description": "一个只做拼装的 bundle：utils-agents（嵌套 SKILL.md 发现、模型可见性、预设/技能仓库/AGENTS.md 面板）、无人值守审批门控、会话通知，以及统一承载全部配置页与侧边栏的浏览器界面。每个组件都是独立发布的包，根包只提供 patch、locale 与图标。"
+    "description": "一个只做拼装的 bundle：utils-agents（嵌套 SKILL.md 发现、模型可见性、预设/技能仓库/AGENTS.md 面板）、无人值守审批门控、会话通知、供自备隧道使用的回环反向代理入口，以及统一承载全部配置页与侧边栏的浏览器界面。每个组件都是独立发布的包，根包只提供 patch、locale 与图标。"
   }
 }

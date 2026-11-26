@@ -1,6 +1,6 @@
 # @xi4z/dsh-utils
 
-DeepSeek Harness 的工具 bundle。根包 `@xi4z/dsh-utils` 只做拼装：`cordis.patch.yml` 声明五个挂载行，`locale/{en,zh}.json` 提供 bundle 展示名，`icon.svg` 是图标；组件代码都在独立发布的包里，根包用同版本精确依赖把它们装起来。挂载行 id 同时是 settings 命名空间，插件页按 `@xi4z/dsh-utils#<行 id>` 定位该行的配置页。
+DeepSeek Harness 的工具 bundle。根包 `@xi4z/dsh-utils` 只做拼装：`cordis.patch.yml` 声明六个挂载行，`locale/{en,zh}.json` 提供 bundle 展示名，`icon.svg` 是图标；组件代码都在独立发布的包里，根包用同版本精确依赖把它们装起来。挂载行 id 同时是 settings 命名空间，插件页按 `@xi4z/dsh-utils#<行 id>` 定位该行的配置页。
 
 | 组件 | 行 id | 包 | 作用 |
 |---|---|---|---|
@@ -8,18 +8,19 @@ DeepSeek Harness 的工具 bundle。根包 `@xi4z/dsh-utils` 只做拼装：`cor
 | 无人值守审批门控 | `dsh-approval-policy` | `@xi4z/dsh-utils-approval-policy` | 给审批请求设应答窗口，超时 fail-closed；对外发布窗口读数 |
 | QQ 审批卡片 | `dsh-approval-qq` | `@xi4z/dsh-utils-approval-qq` | 把待审批请求推成 QQ 卡片（markdown + 允许／拒绝按钮），按钮点击回填审批结论 |
 | 会话通知 | `dsh-notify` | `@xi4z/dsh-utils-notify` | 会话结束 / 等授权 / 等回答时经 Gotify 网关推送，带设备名 |
-| 浏览器界面 | `utils-ui` | `@xi4z/dsh-utils-ui` | 四个宿主行的配置页 + 右侧栏 utils-agents 面板；宿主侧只有空 `apply()` |
+| 反向代理入口 | `dsh-remote` | `@xi4z/dsh-utils-remote` | 本机回环反代：Host/Origin 改写后转发给 DSH Web，供自备隧道发布界面；desktop profile 保持原版桌面 UI 并由宿主自举首次鉴权 |
+| 浏览器界面 | `utils-ui` | `@xi4z/dsh-utils-ui` | 五个宿主行的配置页 + 右侧栏 utils-agents 面板；宿主侧只有空 `apply()` |
 
 ## 安装
 
-装一次 bundle 即可；五个组件由 pnpm 作为根包的精确版本依赖从 registry 装上。
+装一次 bundle 即可；六个组件由 pnpm 作为根包的精确版本依赖从 registry 装上。
 
 | 想要的 | `target` |
 |---|---|
 | 最近一次发布 | `@xi4z/dsh-utils` |
 | `main` 最新提交 | `https://github.com/xi4z/dsh-utils`（组件包仍需 registry 上有同版本） |
-| 离线 | 六个 tarball（见下） |
-| 改代码、即时生效 | 目录 `link:`，profile 里同时 link 五个组件 |
+| 离线 | 七个 tarball（见下） |
+| 改代码、即时生效 | 目录 `link:`，profile 里同时 link 六个组件 |
 
 ```
 plugin_manager action=install_bundle target=@xi4z/dsh-utils
@@ -29,18 +30,18 @@ plugin_manager action=install_bundle target=@xi4z/dsh-utils
 dsh plugin --profile <profile> add @xi4z/dsh-utils
 ```
 
-根包的 `dependencies` 固定到五个 `@xi4z/dsh-utils-*`，版本与 bundle 相同，所以发布版只需要这一个 spec。GitHub 地址装的是 `main` 当前状态、不钉版本；要钉就用 npm 名或 `#<commit>`（组件仍从 registry 取同版本）。
+根包的 `dependencies` 固定到六个 `@xi4z/dsh-utils-*`，版本与 bundle 相同，所以发布版只需要这一个 spec。GitHub 地址装的是 `main` 当前状态、不钉版本；要钉就用 npm 名或 `#<commit>`（组件仍从 registry 取同版本）。
 
-根包 tarball 只含拼装层，组件在各自的包里。离线搬运要把六个包都 pack：
+根包 tarball 只含拼装层，组件在各自的包里。离线搬运要把七个包都 pack：
 
 ```sh
 pnpm install && pnpm build
 pnpm -r --filter "./packages/*" pack --pack-destination dist
 pnpm pack --pack-destination dist
-# 目标机器 profile 里六个 tarball 都加 file: 依赖，再装 bundle
+# 目标机器 profile 里七个 tarball 都加 file: 依赖，再装 bundle
 ```
 
-本地开发装目录（`link:`，不复制文件，改完 `pnpm build` 重启宿主）。组件是精确版本依赖，profile 要把五个组件也 link 进来，pnpm 才会用本地目录而不是去 registry 解析：
+本地开发装目录（`link:`，不复制文件，改完 `pnpm build` 重启宿主）。组件是精确版本依赖，profile 要把六个组件也 link 进来，pnpm 才会用本地目录而不是去 registry 解析：
 
 ```json
 {
@@ -49,13 +50,14 @@ pnpm pack --pack-destination dist
     "@xi4z/dsh-utils-approval-policy": "link:/abs/path/dsh-utils/packages/approval-policy",
     "@xi4z/dsh-utils-approval-qq": "link:/abs/path/dsh-utils/packages/approval-qq",
     "@xi4z/dsh-utils-notify": "link:/abs/path/dsh-utils/packages/notify",
+    "@xi4z/dsh-utils-remote": "link:/abs/path/dsh-utils/packages/remote",
     "@xi4z/dsh-utils-utils-agents": "link:/abs/path/dsh-utils/packages/utils-agents",
     "@xi4z/dsh-utils-ui": "link:/abs/path/dsh-utils/packages/ui"
   }
 }
 ```
 
-profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 patch 自动插五行，不手写挂载块；`config:` 只管配置。挂载项新增/改名要重启宿主。
+profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 patch 自动插六行，不手写挂载块；`config:` 只管配置。挂载项新增/改名要重启宿主。
 
 ## 配置覆盖
 
@@ -82,17 +84,17 @@ profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 p
 
 ## 发布
 
-六个包同版本、按依赖顺序发布：五个组件在前，bundle 在后。`scripts/release.mjs` 先 `npm view` 探一遍，版本已在 registry 上就跳过（重复跑安全、失败可续）；任一包版本与根包不一致会直接报错退出。
+七个包同版本、按依赖顺序发布：六个组件在前，bundle 在后。`scripts/release.mjs` 先 `npm view` 探一遍，版本已在 registry 上就跳过（重复跑安全、失败可续）；任一包版本与根包不一致会直接报错退出。
 
 推 GitHub 与发 npm 合成一次操作——打 tag 触发 [`publish.yml`](.github/workflows/publish.yml)：
 
 ```sh
 git push                                                   # 先推代码
 git tag v$(node -p "require('./package.json').version")     # 打 tag：版本号取根包 version
-git push origin --follow-tags                              # 再推 tag，CI 里 build + 发布全部六个包
+git push origin --follow-tags                              # 再推 tag，CI 里 build + 发布全部七个包
 ```
 
-tag 必须等于根包 `package.json` 的版本，否则 job 直接失败。CI 里 `pnpm release` 按依赖顺序发六个包，带 `--provenance`。
+tag 必须等于根包 `package.json` 的版本，否则 job 直接失败。CI 里 `pnpm release` 按依赖顺序发七个包，带 `--provenance`。
 
 一次性准备：npm 建一个 Automation token，存成仓库 secret `NPM_TOKEN`。scope 是公开的 `@xi4z`，token 所属账号要能用这个 scope（scope 通常是 npm 用户名或已创建的组织）。
 
@@ -104,7 +106,7 @@ pnpm release             # 按顺序发组件与 bundle；已发布版本跳过
 pnpm release --dry-run   # 只看会不会发，不动 registry
 ```
 
-改了任何组件都要把六个 `package.json` 的版本一起提到同一个值，再打 tag。
+改了任何组件都要把七个 `package.json` 的版本一起提到同一个值，再打 tag。
 
 ## 组件一：utils-agents
 
@@ -609,33 +611,102 @@ template: |
 
 `deviceInTitle: true` 时标题变「[设备名] 原标题」。`gotifyHeaders` 自定义头合并进请求，但 `X-Gotify-Key` 始终以当前目标 token 为准，自定义头不能覆盖。
 
-## 组件五：utils-ui（浏览器半侧）
+## 组件五：反向代理入口
 
-宿主半侧只有一个空 `apply()`，`client.js` 提供全部界面。`packages/ui/package.json` 声明 `dsh.client` 并导出 `./client`；patch 的 `utils-ui` 行挂裸包名，DSH 的客户端扫描器因此把 `client.js` 挂在这一行。四个宿主行不声明 `dsh.client`。
+`dsh-remote` 在本机回环端口起一个反向代理，把「自备隧道」接进来的请求转给 DSH Web：
+
+```
+浏览器 → 你的隧道（TLS + 你自己的鉴权） → 127.0.0.1:3079 → 127.0.0.1:<webServer.port>
+```
+
+它不提供隧道，也不取代你的鉴权；它只负责让 DSH 认这笔请求。
+
+**对外端口固定，上游端口每次启动重新解析。** Desktop 的 Host 默认由操作系统分配端口（`apps/desktop`：listen on an OS-assigned port，避免和 `dsh web` 的 3080 撞车），只有打 `webserver.config.port` 补丁才会固定。所以代理自己始终监听配置里的 `listenPort`（默认 3079），而 `webServer.port` 在**每个请求**上重新读取：宿主重启换了端口，隧道侧不用改，代理也不会指着一个死端口。
+
+### 为什么不能把隧道直接指向 3080
+
+DSH Web 有三道门，任意一道都会把远端挡在外面：
+
+| 门 | 远端看到的现象 |
+|---|---|
+| 只监听回环（`--host 0.0.0.0` 被硬拒绝） | 隧道必须转发到 `127.0.0.1` |
+| `/api` 的 Host/Origin 栅栏 | 公网 Host 一律 403；只把 Host 改回回环、Origin 仍是公网，也是 403 |
+| 每个 RPC 都要 `dsh-auth-*` cookie，签名绑定 authority | 远端没有 cookie；`?token=` 是进程启动时随机生成、只在宿主本地可见 |
+
+代理因此只做三件事：把 `Host`/`Origin`/`Referer` 改写成回环权威；转发 HTTP、SSE 与 WebSocket；首页拿到 401 时 302 一次到**宿主自己签发**的带 token 地址。它不读 `.credentials.yaml`、不伪造 cookie、不改文档。
+
+### profile 判定与 UI 策略
+
+激活时按强度顺序判定：`process.versions.electron`（Electron Node 模式的桌面宿主）→ desktop；`DSH_PROFILE`；argv 里的 `--profile desktop` 或 `…/profiles/desktop/` 路径；宿主是否挂了桌面服务；都没有则 unknown。
+
+| profile | 默认策略 | 行为 |
+|---|---|---|
+| desktop | `preserve-desktop-ui` | 原版桌面界面原样转发，不注入客户端模块、不改 HTML、不替换 fallback；首次未登录由代理引导到宿主签发的 token 地址（Desktop 不打印启动 URL，只有宿主能签） |
+| web | `passthrough` | 你已经有启动行打印的 token 地址，代理只转发，不额外跳转 |
+| unknown | 视 `publicUrl` | 配了公网地址就按 desktop 策略自举，否则 passthrough |
+
+`strategy: auto` 走上面的表；`preserve-desktop-ui` / `passthrough` 可以强制。判断结果与原因写在启动日志和状态路由里。
+
+### 配置
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `enabled` | `false` | 总开关；和隧道一起打开 |
+| `listenHost` | `127.0.0.1` | 代理监听地址；非回环需要 `allowRemoteListen: true` |
+| `listenPort` | `3079` | 隧道转发到的本机端口 |
+| `publicUrl` | `''` | 公网 HTTPS 根地址，如 `https://dsh.example.com/`；desktop 自举鉴权需要它 |
+| `strategy` | `auto` | `auto` / `preserve-desktop-ui` / `passthrough` |
+| `autoBootstrap` | `true` | 首页 401 时是否 302 到宿主签发的 token 地址 |
+| `allowRemoteListen` | `false` | 允许非回环监听；只在隧道拨不到回环时才打开 |
+| `bootstrapMaxPerMinute` | `6` | 每个来源每分钟的跳转预算，防止 cookie 被拒时来回跳 |
+| `logAuthCookie` | `true` | 把宿主刚签发的 `dsh-auth-*` cookie 回显到宿主日志 |
+
+`publicUrl`、`strategy`、`autoBootstrap`、`bootstrapMaxPerMinute` 是 volatile 字段，保存即生效；`listenHost`/`listenPort` 在激活时读取，改了要重启宿主。
+
+### 安全边界
+
+- 代理不持有任何凭据：它只改请求头，`dsh-auth-*` 始终由宿主签发与校验。
+- 默认只监听回环；`allowRemoteListen` 是显式例外。
+- 它不是鉴权层。DSH 只有 owner 一个主体，进门即拥有本机全部权限（工具、凭据、文件），**隧道侧的口令/设备白名单/短时令牌才是唯一那道门**。
+- 状态路由 `/_dsh_utils_remote/status` 只对回环来源开放，返回判定结果、上游地址与计数，不含 token。
+- `logAuthCookie` 打开时，宿主日志会出现 `dsh-remote: auth cookie minted for <ip>: dsh-auth-…=…`。这行里就是**一枚可用的 30 天会话凭据**：它不离开本机，但任何能读日志的人（含发给 agent 的日志、备份、工单附件）都能拿它登录。不需要排障时建议关掉。
+
+### 验证
+
+1. patch 里 `enabled: true`、填好 `publicUrl`，重启宿主；
+2. `curl -s http://127.0.0.1:3079/_dsh_utils_remote/status`：应看到 `profile`、`strategy`、`upstream`；宿主重启后 `upstream` 会变，而 3079 不变；
+3. 首次公网访问后宿主日志应出现 `auth cookie minted for …`（`logAuthCookie: true` 时）；
+4. 公网地址第一次访问应 302 到 `?token=…`，跟随后 200 且是原版界面；
+5. 隧道只对你的鉴权入口开放，不要把 3079 直接暴露。
+
+## 组件六：utils-ui（浏览器半侧）
+
+宿主半侧只有一个空 `apply()`，`client.js` 提供全部界面。`packages/ui/package.json` 声明 `dsh.client` 并导出 `./client`；patch 的 `utils-ui` 行挂裸包名，DSH 的客户端扫描器因此把 `client.js` 挂在这一行。五个宿主行不声明 `dsh.client`。
 
 - 配置页：`plugins.row.config`，key 是 `@xi4z/dsh-utils#<行 id>`；utils-agents 一页含「递归技能发现 / 模型可见性 / 预设与技能仓库」三块，审批门控、QQ 审批卡片与通知各一页。每个配置区的「保存」旁有「恢复默认」：一次点击只对本区 `user` 层出现过的字段发 `unset`，回落到宿主的 base／默认值；本节没有用户覆盖时按钮置灰。技能列表超过 8 个默认折叠，避免把下面的配置区挤下去。
 - 右侧栏：`sidebar.right.pane.tab` 的 `utils-agents` 面板，路由全部由 `@xi4z/dsh-utils-utils-agents` 提供。
 - 两套 Deploy Key 的保存/清除、技能仓库配置、版本检查与自动安装都在这个面板里。
 - 保存失败会带回宿主的真实原因：页面直接调 `settings.mutate`，把 `settings/conflict`（并显示两端的 revision）、`settings/rejected` 等失败原文显示在保存按钮旁；技能开关的总线同样显示原因后再还原。写失败后条目被重载或 revision 变化时，刷新页面再保存即可。
 
-停用 `utils-ui` 只失去界面与面板，四个宿主行继续工作。
+停用 `utils-ui` 只失去界面与面板，五个宿主行继续工作。
 
 ## 包结构
 
 ```
 @xi4z/dsh-utils/            只做拼装的 bundle：patch + locale + icon，无组件代码
-├── package.json              dsh.bundle.patch；dependencies = 五个同版本组件
+├── package.json              dsh.bundle.patch；dependencies = 六个同版本组件
 ├── pnpm-workspace.yaml       把 packages/* 串成一个 workspace，本地链接同版本组件
-├── cordis.patch.yml          五行：按裸包名挂五个组件
+├── cordis.patch.yml          六行：按裸包名挂六个组件
 ├── locale/{en,zh}.json       bundle 展示名
 ├── icon.svg
 ├── src/index.ts              空入口
-├── scripts/release.mjs       按依赖顺序发六个包，已发布版本跳过
+├── scripts/release.mjs       按依赖顺序发七个包，已发布版本跳过
 ├── test/layout.test.mjs      布局守卫
-└── packages/                 五个独立发布包
+└── packages/                 六个独立发布包
     ├── approval-policy/      @xi4z/dsh-utils-approval-policy   行 dsh-approval-policy
     ├── approval-qq/          @xi4z/dsh-utils-approval-qq      行 dsh-approval-qq
     ├── notify/               @xi4z/dsh-utils-notify
+    ├── remote/               @xi4z/dsh-utils-remote            行 dsh-remote
     ├── utils-agents/         @xi4z/dsh-utils-utils-agents   行 utils-agents
     └── ui/                   @xi4z/dsh-utils-ui             行 utils-ui + client.js
 ```
@@ -646,7 +717,7 @@ template: |
 
 ```sh
 pnpm install
-pnpm build     # 根包空入口 + packages/* 五个组件
+pnpm build     # 根包空入口 + packages/* 六个组件
 pnpm test      # 构建 + client.js 语法检查 + 布局守卫 + 各包的 node --test
 ```
 

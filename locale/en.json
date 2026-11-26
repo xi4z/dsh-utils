@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Harness Utilities",
-    "description": "A patch-only bundle: utils-agents (nested SKILL.md discovery, model-facing skill visibility, presets / skill repositories / AGENTS.md), an unattended approval gate, session notifications, and one shared browser UI for every row. Each component is published as its own package; the root only carries the patch, locales and icon."
+    "description": "A patch-only bundle: utils-agents (nested SKILL.md discovery, model visibilities, presets, skill repositories and AGENTS.md), an unattended approval gate, session notifications, a loopback reverse-proxy entry for an operator-owned tunnel, and the shared browser UI. Every component is an independently published package; the root ships only the patch, locale and icon."
   }
 }

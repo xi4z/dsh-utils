@@ -19,6 +19,13 @@
 #                          it also owns recursive nested SKILL.md discovery plus
 #                          the model-facing skill visibility switches, merged
 #                          from the former utils-main and dsh-skill-panel rows.
+#   dsh-remote           — loopback reverse-proxy entry for an operator-owned
+#                          tunnel: rewrites Host/Origin/Referer to the loopback
+#                          authority, relays HTTP/SSE/WebSocket, and on a
+#                          desktop profile keeps the stock desktop UI while
+#                          answering the first 401 on GET / with the tokenized
+#                          URL the Host itself minted (the desktop shell never
+#                          prints one). Holds no credential and forges no cookie.
 #   utils-ui             — the browser half shared by every row above: the
 #                          configuration page for each row and the utils-agents
 #                          sidebar panel. Its host half is an empty marker; the
@@ -113,5 +120,26 @@
         updateRegistry: 'https://registry.npmjs.org'
         # 查到新版本就后台 pnpm add；装完要重启 dsh web。link:/file: 安装自动跳过。
         updateAutoInstall: true
+    - id: dsh-remote
+      name: '@xi4z/dsh-utils-remote'
+      config:
+        # 默认关闭：这是给「自备隧道」用的入口，先填 publicUrl 再打开。
+        enabled: false
+        # 隧道转发到本机这个端口；代理自己只监听回环。
+        listenHost: 127.0.0.1
+        listenPort: 3079
+        # 公网 HTTPS 根地址，如 https://dsh.example.com/。
+        # desktop profile 首次未登录时会 302 到宿主自己签发的带 token 地址。
+        publicUrl: ''
+        # auto：desktop 走 preserve-desktop-ui（原版桌面界面 + 宿主自举鉴权），
+        # web 走 passthrough（你自己用启动行打印的 token 地址登录）。
+        strategy: auto
+        autoBootstrap: true
+        # 非回环监听是非默认行为，确有必要才打开。
+        allowRemoteListen: false
+        bootstrapMaxPerMinute: 6
+        # 把宿主刚签发的 dsh-auth-* cookie 回显到日志（它是一枚活的会话凭据，
+        # 只写本机日志；不想留痕就关掉）。
+        logAuthCookie: true
     - id: utils-ui
       name: '@xi4z/dsh-utils-ui'
