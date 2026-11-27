@@ -26,6 +26,7 @@
  * @module dsh-utils/remote
  */
 import z from '@deepseek-ai/schemastery';
+import { installSignIn, } from './signin.js';
 import { detectProfile, normalizeStrategyInput, resolveStrategy, } from './detect.js';
 import { createProxy, isLoopbackHost, normalizePublicUrl, } from './proxy.js';
 /** Row name; the Loader mounts this package under `dsh-remote`. */
@@ -43,6 +44,8 @@ const DEFAULTS = {
     allowRemoteListen: false,
     bootstrapMaxPerMinute: 6,
     logAuthCookie: true,
+    autoSignIn: true,
+    signInMaxPerMinute: 30,
 };
 /**
  * Settings-page schema. Authentication inputs are volatile: the proxy re-reads
@@ -74,6 +77,12 @@ export const Config = z.object({
     logAuthCookie: z.boolean().default(DEFAULTS.logAuthCookie)
         .description('Echo a freshly minted dsh-auth-* cookie into the Host log. The value is a live session credential.')
         .volatile(),
+    autoSignIn: z.boolean().default(DEFAULTS.autoSignIn)
+        .description('Sign a cookie-less browser into the Host\'s own port with its live launch token; independent of enabled.')
+        .volatile(),
+    signInMaxPerMinute: z.natural().min(1).max(600).default(DEFAULTS.signInMaxPerMinute)
+        .description('Direct-port sign-in redirect budget per minute; stops a browser that refuses the cookie.')
+        .volatile(),
 });
 /** Snapshot one Config field, resolving a volatile reference. */
 function unwrap(value) {
@@ -87,6 +96,7 @@ function normalize(config) {
     const value = (key) => unwrap(config?.[key]);
     const port = Number(value('listenPort') ?? DEFAULTS.listenPort);
     const budget = Number(value('bootstrapMaxPerMinute') ?? DEFAULTS.bootstrapMaxPerMinute);
+    const signInBudget = Number(value('signInMaxPerMinute') ?? DEFAULTS.signInMaxPerMinute);
     return {
         enabled: value('enabled') ?? DEFAULTS.enabled,
         listenHost: String(value('listenHost') ?? DEFAULTS.listenHost),
@@ -97,6 +107,8 @@ function normalize(config) {
         allowRemoteListen: value('allowRemoteListen') ?? DEFAULTS.allowRemoteListen,
         bootstrapMaxPerMinute: Number.isInteger(budget) && budget > 0 ? budget : DEFAULTS.bootstrapMaxPerMinute,
         logAuthCookie: value('logAuthCookie') ?? DEFAULTS.logAuthCookie,
+        autoSignIn: value('autoSignIn') ?? DEFAULTS.autoSignIn,
+        signInMaxPerMinute: Number.isInteger(signInBudget) && signInBudget > 0 ? signInBudget : DEFAULTS.signInMaxPerMinute,
     };
 }
 /** Probe the desktop Host's own service without depending on its package. */
@@ -136,6 +148,10 @@ export function apply(ctx, config = {}) {
     const logger = ctx.logger;
     logger.info(`dsh-remote: profile=${profile.profile} (${profile.reason}), strategy=${resolved.strategy} (${resolved.reason}), `
         + `enabled=${initial.enabled}, listen=${initial.listenHost}:${initial.listenPort}`);
+    const connection = ctx.connection;
+    /** Direct-port sign-in is independent of the proxy switch: it serves the host's own listener. */
+    if (initial.autoSignIn)
+        installSignIn(ctx, connection);
     if (!initial.enabled)
         return;
     if (!isLoopbackHost(initial.listenHost) && !initial.allowRemoteListen) {
@@ -144,7 +160,6 @@ export function apply(ctx, config = {}) {
         return;
     }
     const webServer = ctx.webServer;
-    const connection = ctx.connection;
     const upstreamPort = Number(webServer?.port);
     if (!Number.isInteger(upstreamPort) || upstreamPort <= 0) {
         logger.error('dsh-remote: the Web server has no listening port yet; the proxy was not started');

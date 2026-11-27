@@ -48,6 +48,8 @@ export interface RemoteConfig {
     readonly allowRemoteListen?: MaybeRef<boolean>;
     readonly bootstrapMaxPerMinute?: MaybeRef<number>;
     readonly logAuthCookie?: MaybeRef<boolean>;
+    readonly autoSignIn?: MaybeRef<boolean>;
+    readonly signInMaxPerMinute?: MaybeRef<number>;
 }
 /**
  * Settings-page schema. Authentication inputs are volatile: the proxy re-reads
@@ -64,6 +66,8 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     allowRemoteListen: z<boolean, boolean, "defined">;
     bootstrapMaxPerMinute: z<number, number, "volatile-defined">;
     logAuthCookie: z<boolean, boolean, "volatile-defined">;
+    autoSignIn: z<boolean, boolean, "volatile-defined">;
+    signInMaxPerMinute: z<number, number, "volatile-defined">;
 }>>, Schemastery.ObjectT<NoInfer<{
     enabled: z<boolean, boolean, "volatile-defined">;
     listenHost: z<string, string, "defined">;
@@ -74,6 +78,8 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     allowRemoteListen: z<boolean, boolean, "defined">;
     bootstrapMaxPerMinute: z<number, number, "volatile-defined">;
     logAuthCookie: z<boolean, boolean, "volatile-defined">;
+    autoSignIn: z<boolean, boolean, "volatile-defined">;
+    signInMaxPerMinute: z<number, number, "volatile-defined">;
 }>>, "plain">;
 /**
  * Activate the proxy.

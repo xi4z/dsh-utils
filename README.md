@@ -657,11 +657,26 @@ DSH Web 有三道门，任意一道都会把远端挡在外面：
 | `publicUrl` | `''` | 公网 HTTPS 根地址，如 `https://dsh.example.com/`；desktop 自举鉴权需要它 |
 | `strategy` | `auto` | `auto` / `preserve-desktop-ui` / `passthrough` |
 | `autoBootstrap` | `true` | 首页 401 时是否 302 到宿主签发的 token 地址 |
+| `autoSignIn` | `true` | 直接访问宿主端口时的自动登录：没有 cookie 就用宿主自己的 launch token 换 cookie；与 `enabled` 无关 |
+| `signInMaxPerMinute` | `30` | 直接端口自动登录的跳转预算，防止浏览器拒收 cookie 时来回跳 |
 | `allowRemoteListen` | `false` | 允许非回环监听；只在隧道拨不到回环时才打开 |
 | `bootstrapMaxPerMinute` | `6` | 每个来源每分钟的跳转预算，防止 cookie 被拒时来回跳 |
 | `logAuthCookie` | `true` | 把宿主刚签发的 `dsh-auth-*` cookie 回显到宿主日志 |
 
-`publicUrl`、`strategy`、`autoBootstrap`、`bootstrapMaxPerMinute` 是 volatile 字段，保存即生效；`listenHost`/`listenPort` 在激活时读取，改了要重启宿主。
+`publicUrl`、`strategy`、`autoBootstrap`、`bootstrapMaxPerMinute`、`autoSignIn`、`signInMaxPerMinute` 是 volatile 字段，保存即生效；`listenHost`/`listenPort` 在激活时读取，改了要重启宿主。
+
+### 直接端口自动登录
+
+代理只处理走了隧道的那条路；宿主自己打印的 `127.0.0.1:3080` 是另一扇门，隧道没开、或者浏览器把启动 URL 弄丢了，人就卡在 `401 dsh web authentication required`。`autoSignIn` 补的就是这一扇：
+
+1. 浏览器 `GET /`，没有 `dsh-auth-*` cookie，URL 也没带 token；
+2. 插件用宿主自己的 `browserAuth.launchToken` 回 `303 Location: /?token=<launchToken>`；
+3. 宿主的 `BrowserAuth` 校验 token、签发 cookie，再 `303` 回干净的 `/`；
+4. 地址栏停在 `/`，之后的页面、`/api`、WebSocket 都沿用这张 cookie。
+
+它只包裹 `authorizeIndex()`，不读凭据、不伪造 cookie：token 是否有效、cookie 怎么签、Host/Origin 栅栏都留在宿主原逻辑里。已经带 token 的请求直接交给宿主，token 无效时看到的就是宿主的 `401`，不会来回弹；浏览器不收 cookie 的情况由每分钟跳转预算兜底（默认 30 次），用尽后交回 `401` 并告警一次。
+
+它与代理的 `autoBootstrap` 是两套入口：那个在反代层接 401，这个在宿主索引层接 401，可以各自开关。
 
 ### 安全边界
 

@@ -1,6 +1,6 @@
 {
   "name": "@xi4z/dsh-utils-remote",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "dsh-utils component: a loopback reverse proxy in front of the Harness Web server, so an operator-owned tunnel can publish the GUI — with a desktop profile kept on its stock UI and authentication bootstrapped by the Host itself.",
   "license": "MIT",
   "author": "xi4z",

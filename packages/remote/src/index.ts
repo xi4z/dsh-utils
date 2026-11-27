@@ -30,6 +30,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 
 import {
+  installSignIn,
+  type BrowserAuthLike,
+} from './signin.js'
+import {
   detectProfile,
   normalizeStrategyInput,
   resolveStrategy,
@@ -71,6 +75,8 @@ export interface RemoteConfig {
   readonly allowRemoteListen?: MaybeRef<boolean>
   readonly bootstrapMaxPerMinute?: MaybeRef<number>
   readonly logAuthCookie?: MaybeRef<boolean>
+  readonly autoSignIn?: MaybeRef<boolean>
+  readonly signInMaxPerMinute?: MaybeRef<number>
 }
 
 /** Defaults, also used by the settings schema. */
@@ -84,6 +90,8 @@ const DEFAULTS = {
   allowRemoteListen: false,
   bootstrapMaxPerMinute: 6,
   logAuthCookie: true,
+  autoSignIn: true,
+  signInMaxPerMinute: 30,
 }
 
 /**
@@ -116,6 +124,12 @@ export const Config = z.object({
   logAuthCookie: z.boolean().default(DEFAULTS.logAuthCookie)
     .description('Echo a freshly minted dsh-auth-* cookie into the Host log. The value is a live session credential.')
     .volatile(),
+  autoSignIn: z.boolean().default(DEFAULTS.autoSignIn)
+    .description('Sign a cookie-less browser into the Host\'s own port with its live launch token; independent of enabled.')
+    .volatile(),
+  signInMaxPerMinute: z.natural().min(1).max(600).default(DEFAULTS.signInMaxPerMinute)
+    .description('Direct-port sign-in redirect budget per minute; stops a browser that refuses the cookie.')
+    .volatile(),
 })
 
 /** Resolved values, with defaults applied. */
@@ -129,6 +143,8 @@ interface Options {
   allowRemoteListen: boolean
   bootstrapMaxPerMinute: number
   logAuthCookie: boolean
+  autoSignIn: boolean
+  signInMaxPerMinute: number
 }
 
 /** The Host services this row adapts to; typed locally so the package needs no dsh dependency. */
@@ -140,6 +156,7 @@ interface WebServerLike {
 
 interface ConnectionLike {
   authenticatedUrl(baseUrl: string): string
+  readonly browserAuth?: BrowserAuthLike
 }
 
 /** Snapshot one Config field, resolving a volatile reference. */
@@ -155,6 +172,7 @@ function normalize(config: RemoteConfig | undefined): Options {
   const value = <T>(key: keyof RemoteConfig): T | undefined => unwrap<T>(config?.[key] as MaybeRef<T> | undefined)
   const port = Number(value<number>('listenPort') ?? DEFAULTS.listenPort)
   const budget = Number(value<number>('bootstrapMaxPerMinute') ?? DEFAULTS.bootstrapMaxPerMinute)
+  const signInBudget = Number(value<number>('signInMaxPerMinute') ?? DEFAULTS.signInMaxPerMinute)
   return {
     enabled: value<boolean>('enabled') ?? DEFAULTS.enabled,
     listenHost: String(value<string>('listenHost') ?? DEFAULTS.listenHost),
@@ -165,6 +183,8 @@ function normalize(config: RemoteConfig | undefined): Options {
     allowRemoteListen: value<boolean>('allowRemoteListen') ?? DEFAULTS.allowRemoteListen,
     bootstrapMaxPerMinute: Number.isInteger(budget) && budget > 0 ? budget : DEFAULTS.bootstrapMaxPerMinute,
     logAuthCookie: value<boolean>('logAuthCookie') ?? DEFAULTS.logAuthCookie,
+    autoSignIn: value<boolean>('autoSignIn') ?? DEFAULTS.autoSignIn,
+    signInMaxPerMinute: Number.isInteger(signInBudget) && signInBudget > 0 ? signInBudget : DEFAULTS.signInMaxPerMinute,
   }
 }
 
@@ -208,6 +228,11 @@ export function apply(ctx: Context, config: RemoteConfig = {}): void {
     + `enabled=${initial.enabled}, listen=${initial.listenHost}:${initial.listenPort}`,
   )
 
+  const connection = (ctx as unknown as { connection?: ConnectionLike }).connection
+
+  /** Direct-port sign-in is independent of the proxy switch: it serves the host's own listener. */
+  if (initial.autoSignIn) installSignIn(ctx, connection)
+
   if (!initial.enabled) return
 
   if (!isLoopbackHost(initial.listenHost) && !initial.allowRemoteListen) {
@@ -219,7 +244,6 @@ export function apply(ctx: Context, config: RemoteConfig = {}): void {
   }
 
   const webServer = (ctx as unknown as { webServer?: WebServerLike }).webServer
-  const connection = (ctx as unknown as { connection?: ConnectionLike }).connection
   const upstreamPort = Number(webServer?.port)
   if (!Number.isInteger(upstreamPort) || upstreamPort <= 0) {
     logger.error('dsh-remote: the Web server has no listening port yet; the proxy was not started')

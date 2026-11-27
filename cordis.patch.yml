@@ -135,6 +135,11 @@
         # web 走 passthrough（你自己用启动行打印的 token 地址登录）。
         strategy: auto
         autoBootstrap: true
+        # 直接访问宿主端口（不走代理）时的自动登录：没有 cookie 就用宿主自己的
+        # launch token 换一张宿主签发的 cookie，启动时打印的 ?token= 地址因此可省。
+        # 与 enabled 无关：代理关着它也照常工作。
+        autoSignIn: true
+        signInMaxPerMinute: 30
         # 非回环监听是非默认行为，确有必要才打开。
         allowRemoteListen: false
         bootstrapMaxPerMinute: 6
