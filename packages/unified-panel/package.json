@@ -1,0 +1,61 @@
+{
+  "name": "@xi4z/dsh-utils-unified-panel",
+  "version": "0.18.0",
+  "description": "dsh-utils component: every device’s recent DSH sessions injected into the native Workspace tree, with the remote conversation opened in the app.",
+  "license": "MIT",
+  "author": "xi4z",
+  "homepage": "https://github.com/xi4z/dsh-utils",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xi4z/dsh-utils.git",
+    "directory": "packages/unified-panel"
+  },
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js",
+      "default": "./lib/index.js"
+    },
+    "./client": "./client.js",
+    "./helper.mjs": "./helper.mjs",
+    "./locale/*.json": "./locale/*.json",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client.js",
+    "helper.mjs",
+    "peers.example.json",
+    "locale",
+    "src"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.0"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

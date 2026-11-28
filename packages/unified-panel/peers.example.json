@@ -1,0 +1,17 @@
+{
+  "peers": [
+    {
+      "name": "本机",
+      "transport": "local",
+      "dshHome": "~/.dsh"
+    },
+    {
+      "name": "腾讯云",
+      "transport": "ssh",
+      "target": "xiaz",
+      "bridge": {
+        "port": 8791
+      }
+    }
+  ]
+}

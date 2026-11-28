@@ -9,22 +9,25 @@ importers:
   .:
     dependencies:
       '@xi4z/dsh-utils-approval-policy':
-        specifier: 0.17.0
+        specifier: 0.18.0
         version: link:packages/approval-policy
       '@xi4z/dsh-utils-approval-qq':
-        specifier: 0.17.0
+        specifier: 0.18.0
         version: link:packages/approval-qq
       '@xi4z/dsh-utils-notify':
-        specifier: 0.17.0
+        specifier: 0.18.0
         version: link:packages/notify
       '@xi4z/dsh-utils-remote':
-        specifier: 0.17.0
+        specifier: 0.18.0
         version: link:packages/remote
       '@xi4z/dsh-utils-ui':
-        specifier: 0.17.0
+        specifier: 0.18.0
         version: link:packages/ui
+      '@xi4z/dsh-utils-unified-panel':
+        specifier: 0.18.0
+        version: link:packages/unified-panel
       '@xi4z/dsh-utils-utils-agents':
-        specifier: 0.17.0
+        specifier: 0.18.0
         version: link:packages/utils-agents
     devDependencies:
       '@deepseek-ai/cordis':
@@ -126,6 +129,18 @@ importers:
         version: 5.9.3
 
   packages/ui:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: 4.1.0
+        version: 4.1.0(@deepseek-ai/cordis-plugin-include@1.1.0)(@deepseek-ai/cordis-plugin-loader@1.1.0)
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.2
+      typescript:
+        specifier: ~5.9.0
+        version: 5.9.3
+
+  packages/unified-panel:
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.1.0

@@ -146,5 +146,8 @@
         # 把宿主刚签发的 dsh-auth-* cookie 回显到日志（它是一枚活的会话凭据，
         # 只写本机日志；不想留痕就关掉）。
         logAuthCookie: true
+    - id: unified-panel
+      name: '@xi4z/dsh-utils-unified-panel'
+      config: {}
     - id: utils-ui
       name: '@xi4z/dsh-utils-ui'

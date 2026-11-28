@@ -1,7 +1,7 @@
 /**
  * Workspace layout guard.
  *
- * The repository ships a patch-only bundle plus six independently published
+ * The repository ships a patch-only bundle plus seven independently published
  * component packages — the same shape as the shipped experimental bundles:
  *
  * - `@xi4z/dsh-utils` owns only the patch layer, locale and icon. It mounts no
@@ -10,7 +10,7 @@
  * - Every component is a real package with its own manifest, built entry and
  *   `locale/*.json` row title. The shared browser half lives in its own
  *   `@xi4z/dsh-utils-ui` package.
- * - `cordis.patch.yml` mounts all six by bare package name, so the plugin page
+ * - `cordis.patch.yml` mounts all seven by bare package name, so the plugin page
  *   keeps addressing each row's configuration as `@xi4z/dsh-utils#<row id>`.
  * - One release train: every package shares the bundle version.
  *
@@ -33,6 +33,7 @@ const COMPONENTS = [
   { dir: 'approval-qq', name: `${BUNDLE}-approval-qq`, row: 'dsh-approval-qq', client: false },
   { dir: 'notify', name: `${BUNDLE}-notify`, row: 'dsh-notify', client: false },
   { dir: 'remote', name: `${BUNDLE}-remote`, row: 'dsh-remote', client: false },
+  { dir: 'unified-panel', name: `${BUNDLE}-unified-panel`, row: 'unified-panel', client: true },
   { dir: 'utils-agents', name: `${BUNDLE}-utils-agents`, row: 'utils-agents', client: false },
   { dir: 'ui', name: `${BUNDLE}-ui`, row: 'utils-ui', client: true },
 ]

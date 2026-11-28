@@ -22,7 +22,7 @@ const dryRun = process.argv.includes('--dry-run')
 const root = process.cwd()
 
 /** Dependency order: every component before the bundle that mounts it. */
-const COMPONENTS = ['approval-policy', 'approval-qq', 'notify', 'remote', 'utils-agents', 'ui']
+const COMPONENTS = ['approval-policy', 'approval-qq', 'notify', 'remote', 'unified-panel', 'utils-agents', 'ui']
 
 function read(dir) {
   return { dir, ...JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) }

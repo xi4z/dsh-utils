@@ -1,6 +1,6 @@
 # @xi4z/dsh-utils
 
-DeepSeek Harness 的工具 bundle。根包 `@xi4z/dsh-utils` 只做拼装：`cordis.patch.yml` 声明六个挂载行，`locale/{en,zh}.json` 提供 bundle 展示名，`icon.svg` 是图标；组件代码都在独立发布的包里，根包用同版本精确依赖把它们装起来。挂载行 id 同时是 settings 命名空间，插件页按 `@xi4z/dsh-utils#<行 id>` 定位该行的配置页。
+DeepSeek Harness 的工具 bundle。根包 `@xi4z/dsh-utils` 只做拼装：`cordis.patch.yml` 声明七个挂载行，`locale/{en,zh}.json` 提供 bundle 展示名，`icon.svg` 是图标；组件代码都在独立发布的包里，根包用同版本精确依赖把它们装起来。挂载行 id 同时是 settings 命名空间，插件页按 `@xi4z/dsh-utils#<行 id>` 定位该行的配置页。
 
 | 组件 | 行 id | 包 | 作用 |
 |---|---|---|---|
@@ -9,18 +9,18 @@ DeepSeek Harness 的工具 bundle。根包 `@xi4z/dsh-utils` 只做拼装：`cor
 | QQ 审批卡片 | `dsh-approval-qq` | `@xi4z/dsh-utils-approval-qq` | 把待审批请求推成 QQ 卡片（markdown + 允许／拒绝按钮），按钮点击回填审批结论 |
 | 会话通知 | `dsh-notify` | `@xi4z/dsh-utils-notify` | 会话结束 / 等授权 / 等回答时经 Gotify 网关推送，带设备名 |
 | 反向代理入口 | `dsh-remote` | `@xi4z/dsh-utils-remote` | 本机回环反代：Host/Origin 改写后转发给 DSH Web，供自备隧道发布界面；desktop profile 保持原版桌面 UI 并由宿主自举首次鉴权 |
-| 浏览器界面 | `utils-ui` | `@xi4z/dsh-utils-ui` | 五个宿主行的配置页 + 右侧栏 utils-agents 面板；宿主侧只有空 `apply()` |
+| 浏览器界面 | `utils-ui` | `@xi4z/dsh-utils-ui` | 各宿主行的配置页 + 右侧栏 utils-agents 面板；宿主侧只有空 `apply()` |
 
 ## 安装
 
-装一次 bundle 即可；六个组件由 pnpm 作为根包的精确版本依赖从 registry 装上。
+装一次 bundle 即可；七个组件由 pnpm 作为根包的精确版本依赖从 registry 装上。
 
 | 想要的 | `target` |
 |---|---|
 | 最近一次发布 | `@xi4z/dsh-utils` |
 | `main` 最新提交 | `https://github.com/xi4z/dsh-utils`（组件包仍需 registry 上有同版本） |
-| 离线 | 七个 tarball（见下） |
-| 改代码、即时生效 | 目录 `link:`，profile 里同时 link 六个组件 |
+| 离线 | 八个 tarball（见下） |
+| 改代码、即时生效 | 目录 `link:`，profile 里同时 link 七个组件 |
 
 ```
 plugin_manager action=install_bundle target=@xi4z/dsh-utils
@@ -30,9 +30,9 @@ plugin_manager action=install_bundle target=@xi4z/dsh-utils
 dsh plugin --profile <profile> add @xi4z/dsh-utils
 ```
 
-根包的 `dependencies` 固定到六个 `@xi4z/dsh-utils-*`，版本与 bundle 相同，所以发布版只需要这一个 spec。GitHub 地址装的是 `main` 当前状态、不钉版本；要钉就用 npm 名或 `#<commit>`（组件仍从 registry 取同版本）。
+根包的 `dependencies` 固定到七个 `@xi4z/dsh-utils-*`，版本与 bundle 相同，所以发布版只需要这一个 spec。GitHub 地址装的是 `main` 当前状态、不钉版本；要钉就用 npm 名或 `#<commit>`（组件仍从 registry 取同版本）。
 
-根包 tarball 只含拼装层，组件在各自的包里。离线搬运要把七个包都 pack：
+根包 tarball 只含拼装层，组件在各自的包里。离线搬运要把八个包都 pack：
 
 ```sh
 pnpm install && pnpm build
@@ -41,7 +41,7 @@ pnpm pack --pack-destination dist
 # 目标机器 profile 里七个 tarball 都加 file: 依赖，再装 bundle
 ```
 
-本地开发装目录（`link:`，不复制文件，改完 `pnpm build` 重启宿主）。组件是精确版本依赖，profile 要把六个组件也 link 进来，pnpm 才会用本地目录而不是去 registry 解析：
+本地开发装目录（`link:`，不复制文件，改完 `pnpm build` 重启宿主）。组件是精确版本依赖，profile 要把七个组件也 link 进来，pnpm 才会用本地目录而不是去 registry 解析：
 
 ```json
 {
@@ -51,13 +51,14 @@ pnpm pack --pack-destination dist
     "@xi4z/dsh-utils-approval-qq": "link:/abs/path/dsh-utils/packages/approval-qq",
     "@xi4z/dsh-utils-notify": "link:/abs/path/dsh-utils/packages/notify",
     "@xi4z/dsh-utils-remote": "link:/abs/path/dsh-utils/packages/remote",
+    "@xi4z/dsh-utils-unified-panel": "link:/abs/path/dsh-utils/packages/unified-panel",
     "@xi4z/dsh-utils-utils-agents": "link:/abs/path/dsh-utils/packages/utils-agents",
     "@xi4z/dsh-utils-ui": "link:/abs/path/dsh-utils/packages/ui"
   }
 }
 ```
 
-profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 patch 自动插六行，不手写挂载块；`config:` 只管配置。挂载项新增/改名要重启宿主。
+profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 patch 自动插七行，不手写挂载块；`config:` 只管配置。挂载项新增/改名要重启宿主。
 
 ## 配置覆盖
 
@@ -84,17 +85,17 @@ profile 的 `dsh.profile.bundles` 里是 `@xi4z/dsh-utils`。装后 bundle 的 p
 
 ## 发布
 
-七个包同版本、按依赖顺序发布：六个组件在前，bundle 在后。`scripts/release.mjs` 先 `npm view` 探一遍，版本已在 registry 上就跳过（重复跑安全、失败可续）；任一包版本与根包不一致会直接报错退出。
+八个包同版本、按依赖顺序发布：七个组件在前，bundle 在后。`scripts/release.mjs` 先 `npm view` 探一遍，版本已在 registry 上就跳过（重复跑安全、失败可续）；任一包版本与根包不一致会直接报错退出。
 
 推 GitHub 与发 npm 合成一次操作——打 tag 触发 [`publish.yml`](.github/workflows/publish.yml)：
 
 ```sh
 git push                                                   # 先推代码
 git tag v$(node -p "require('./package.json').version")     # 打 tag：版本号取根包 version
-git push origin --follow-tags                              # 再推 tag，CI 里 build + 发布全部七个包
+git push origin --follow-tags                              # 再推 tag，CI 里 build + 发布全部八个包
 ```
 
-tag 必须等于根包 `package.json` 的版本，否则 job 直接失败。CI 里 `pnpm release` 按依赖顺序发七个包，带 `--provenance`。
+tag 必须等于根包 `package.json` 的版本，否则 job 直接失败。CI 里 `pnpm release` 按依赖顺序发八个包，带 `--provenance`。
 
 一次性准备：npm 建一个 Automation token，存成仓库 secret `NPM_TOKEN`。scope 是公开的 `@xi4z`，token 所属账号要能用这个 scope（scope 通常是 npm 用户名或已创建的组织）。
 
@@ -106,7 +107,7 @@ pnpm release             # 按顺序发组件与 bundle；已发布版本跳过
 pnpm release --dry-run   # 只看会不会发，不动 registry
 ```
 
-改了任何组件都要把七个 `package.json` 的版本一起提到同一个值，再打 tag。
+改了任何组件都要把八个 `package.json` 的版本一起提到同一个值，再打 tag。
 
 ## 组件一：utils-agents
 
@@ -745,32 +746,41 @@ location / {
 
 ## 组件六：utils-ui（浏览器半侧）
 
-宿主半侧只有一个空 `apply()`，`client.js` 提供全部界面。`packages/ui/package.json` 声明 `dsh.client` 并导出 `./client`；patch 的 `utils-ui` 行挂裸包名，DSH 的客户端扫描器因此把 `client.js` 挂在这一行。五个宿主行不声明 `dsh.client`。
+宿主半侧只有一个空 `apply()`，`client.js` 提供全部界面。`packages/ui/package.json` 声明 `dsh.client` 并导出 `./client`；patch 的 `utils-ui` 行挂裸包名，DSH 的客户端扫描器因此把 `client.js` 挂在这一行。六个宿主行不声明 `dsh.client`。
 
 - 配置页：`plugins.row.config`，key 是 `@xi4z/dsh-utils#<行 id>`；utils-agents 一页含「递归技能发现 / 模型可见性 / 预设与技能仓库」三块，审批门控、QQ 审批卡片、通知与反向代理入口各一页。反向代理页可直接改监听端口、公网地址、界面策略与日志选项，保存即生效（`listenHost`/`listenPort` 需重启宿主）。每个配置区的「保存」旁有「恢复默认」：一次点击只对本区 `user` 层出现过的字段发 `unset`，回落到宿主的 base／默认值；本节没有用户覆盖时按钮置灰。技能列表超过 8 个默认折叠，避免把下面的配置区挤下去。
 - 右侧栏：`sidebar.right.pane.tab` 的 `utils-agents` 面板，路由全部由 `@xi4z/dsh-utils-utils-agents` 提供。
 - 两套 Deploy Key 的保存/清除、技能仓库配置、版本检查与自动安装都在这个面板里。
 - 保存失败会指出「哪里出错」并带回宿主的真实原因：状态行先给区名（如「反向代理入口」）和这次保存涉及的字段；宿主消息点名字段时（schema 拒绝通常写成 `Config field "publicUrl" is not volatile`），该字段直接标成「出错位置」，并在字段下方显示红字标记。页面直接调 `settings.mutate`，`settings/conflict`（并显示两端的 revision）、`settings/rejected` 等失败原文照原样带出；走共享表单、宿主只回布尔值时没有原因可显示，页面改为提示检查该组件是否已在宿主里激活。技能开关同样先显示技能名与原因再还原。写失败后条目被重载或 revision 变化时，刷新页面再保存即可。
 
-停用 `utils-ui` 只失去界面与面板，五个宿主行继续工作。
+停用 `utils-ui` 只失去界面与面板，六个宿主行继续工作。
+
+## 组件七：unified-panel（跨机会话）
+
+宿主半侧提供 `GET /api/unified/sessions`（SSH 或本地聚合各机 `~/.dsh/sessions`）和 `POST /api/unified/decide`（把审批转发到那台机器的 bridge）。浏览器半侧**不替换工作区栏**，而是把远端会话注入 `ctx.sessions.list` / `ctx.workspaces.list` 的快照：每台设备一个虚拟根，按会话真实 `cwd` 逐级生成工作区（`腾讯云` → `root` → `.dsh` → …），标题只用目录名，不加空格缩进。Workspaces 的视图选项切到 **Workspace Tree（按工作区树）** 后由原生缩进展开；点击伪造会话在捕获阶段被拦下，转到 `main` 槽的 `unified-remote` 面板，用 `?embed=1&session=` 在中间区域打开远端会话。
+
+配置：包根的 `peers.json`（**不提交**，模板见 `peers.example.json`）或行配置里的 `peers`；每台 `{ name, transport: "ssh" | "local", target | dshHome, web: { url }, bridge: { port, token } }`。`web.url` 是该机 DSH Web 的可达地址，缺它就只列会话、不打开画面。
+
+注意：注入是客户端模拟，依赖 `SessionSummary` / `WorkspaceView` 的形状和 `data-row-key`，DSH 客户端升级可能失效；伪造工作区上的原生菜单（重命名 / 删除 / 在文件夹中显示）仍会打到宿主。
 
 ## 包结构
 
 ```
 @xi4z/dsh-utils/            只做拼装的 bundle：patch + locale + icon，无组件代码
-├── package.json              dsh.bundle.patch；dependencies = 六个同版本组件
+├── package.json              dsh.bundle.patch；dependencies = 七个同版本组件
 ├── pnpm-workspace.yaml       把 packages/* 串成一个 workspace，本地链接同版本组件
-├── cordis.patch.yml          六行：按裸包名挂六个组件
+├── cordis.patch.yml          七行：按裸包名挂七个组件
 ├── locale/{en,zh}.json       bundle 展示名
 ├── icon.svg
 ├── src/index.ts              空入口
-├── scripts/release.mjs       按依赖顺序发七个包，已发布版本跳过
+├── scripts/release.mjs       按依赖顺序发八个包，已发布版本跳过
 ├── test/layout.test.mjs      布局守卫
-└── packages/                 六个独立发布包
+└── packages/                 七个独立发布包
     ├── approval-policy/      @xi4z/dsh-utils-approval-policy   行 dsh-approval-policy
     ├── approval-qq/          @xi4z/dsh-utils-approval-qq      行 dsh-approval-qq
     ├── notify/               @xi4z/dsh-utils-notify
     ├── remote/               @xi4z/dsh-utils-remote            行 dsh-remote
+    ├── unified-panel/        @xi4z/dsh-utils-unified-panel  行 unified-panel + client.js
     ├── utils-agents/         @xi4z/dsh-utils-utils-agents   行 utils-agents
     └── ui/                   @xi4z/dsh-utils-ui             行 utils-ui + client.js
 ```
@@ -781,7 +791,7 @@ location / {
 
 ```sh
 pnpm install
-pnpm build     # 根包空入口 + packages/* 六个组件
+pnpm build     # 根包空入口 + packages/* 七个组件
 pnpm test      # 构建 + client.js 语法检查 + 布局守卫 + 各包的 node --test
 ```
 
