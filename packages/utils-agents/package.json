@@ -1,6 +1,6 @@
 {
   "name": "@xi4z/dsh-utils-utils-agents",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "dsh-utils component: the utils-agents panel that manages presets, skills, skill repositories and AGENTS.md; it also owns nested SKILL.md discovery and the model-facing skill visibility switches, merged from the former main and skill-panel components.",
   "license": "MIT",
   "author": "xi4z",

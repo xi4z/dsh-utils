@@ -159,6 +159,8 @@ window.__ModuleLoader__.load({
 .dsu-status { color: var(--dsw-alias-label-secondary); }
 .dsu-note { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; }
 .dsu-error { margin: 0; color: var(--dsw-alias-label-error, #d9534f); font-size: 12px; }
+.dsu-fieldError { margin: 0; color: var(--dsw-alias-label-error, #d9534f); font-size: 12px; }
+.dsu-fieldError[data-pointed="true"] { font-weight: 600; }
 `
 
     function splitLines(text) {
@@ -301,6 +303,61 @@ window.__ModuleLoader__.load({
       return code === '' || code === 'settings/rejected' ? message : `${message}（${code}）`
     }
 
+    /** Field keys one write touched, in form order and de-duplicated. */
+    function touchedKeys(fields, ops) {
+      const keys = []
+      for (const op of Array.isArray(ops) ? ops : []) {
+        const path = op !== null && typeof op === 'object' && Array.isArray(op.path) ? op.path : []
+        const key = typeof path[0] === 'string' ? path[0] : ''
+        if (key !== '' && !keys.includes(key) && fields.some((field) => field.key === key)) keys.push(key)
+      }
+      return keys
+    }
+
+    /**
+     * The field the Host's own refusal text names, when it names one. Schema
+     * refusals read like `Config field "publicUrl" is not volatile`, so the
+     * longest matching key wins when one key is a suffix of another.
+     */
+    function namedKey(fields, reason) {
+      if (typeof reason !== 'string' || reason === '') return null
+      // The wire key is what the Host prints; the page label is the fallback.
+      const longest = (hits) => hits.slice().sort((left, right) => right.key.length - left.key.length)[0]
+      const byKey = longest(fields.filter((field) => reason.includes(field.key)))
+      if (byKey !== undefined) return byKey.key
+      const byLabel = longest(fields.filter((field) => field.label !== '' && reason.includes(field.label)))
+      return byLabel === undefined ? null : byLabel.key
+    }
+
+    /** One field as prose: its page label plus the wire key the Host talks about. */
+    function fieldRef(fields, key) {
+      const field = fields.find((row) => row.key === key)
+      return field === undefined ? `「${key}」` : `「${field.label}」（${field.key}）`
+    }
+
+    /**
+     * Explain one refused write: which section and namespace, which fields the
+     * save carried, and where the error sits. The Host names the offending
+     * field in most schema refusals, and that field is called out as the error
+     * location; otherwise the touched fields are listed. The shared form keeps
+     * only the boolean outcome, so a refusal without a reason falls back to the
+     * usual cause (the component never activated its namespace).
+     */
+    function refusalText({ action, title, ns, fields, ops, reason }) {
+      const keys = touchedKeys(fields, ops)
+      const where = keys.length === 0
+        ? '没有任何字段被写入'
+        : `涉及的字段：${keys.map((key) => fieldRef(fields, key)).join('、')}`
+      const text = typeof reason === 'string' ? reason.trim() : ''
+      const head = `「${title}」${action}失败：宿主拒绝了这次修改`
+      const named = namedKey(fields, text)
+      if (text !== '' && named !== null) return `${head}。出错位置：字段${fieldRef(fields, named)}。宿主原因：${text}`
+      if (text !== '') return `${head}。${where}。宿主原因：${text}`
+      const namespace = typeof ns === 'string' && ns !== '' ? ns : '这个组件'
+      return `${head}。${where}。宿主没有返回原因：共享表单只回布尔值；`
+        + `先看 dsh web 启动日志里 ${namespace} 是否激活（组件没装上时就是这样），重启后再试。`
+    }
+
     /** Section fields that carry a user-layer override, in field order. */
     function overriddenKeys(fields, snapshot) {
       const user = snapshot?.user
@@ -315,6 +372,8 @@ window.__ModuleLoader__.load({
       const state = form.getSnapshot()
       const [draft, setDraft] = React.useState(() => toDraft(fields, state.value))
       const [status, setStatus] = React.useState('')
+      // The refused write, kept so each field it touched can carry its own mark.
+      const [refusal, setRefusal] = React.useState(null)
       const secretFields = fields.filter((field) => field.kind === 'secret')
       const secretAvailable = secretFields.length > 0 && typeof describeSecrets === 'function'
       // undefined = no secret channel, null = first read in flight, [] = read.
@@ -355,10 +414,12 @@ window.__ModuleLoader__.load({
       }
       const update = (key, value) => {
         setStatus('')
+        setRefusal(null)
         setDraft((current) => ({ ...current, [key]: value }))
       }
       const toggleOption = (key, id, checked) => {
         setStatus('')
+        setRefusal(null)
         setDraft((current) => {
           const chosen = new Set(current[key])
           if (checked) chosen.add(id)
@@ -390,6 +451,25 @@ window.__ModuleLoader__.load({
         clearSecretDrafts()
       }
 
+      /** Report one refused write: status prose plus the per-field marks. */
+      const refuse = (action, ops, reason) => {
+        const text = typeof reason === 'string' && reason !== '宿主没有返回原因。' ? reason : ''
+        setStatus(refusalText({ action, title, ns, fields, ops, reason: text }))
+        setRefusal({ action, keys: touchedKeys(fields, ops), named: namedKey(fields, text), reason: text })
+      }
+
+      /** The inline mark under one field the refused write carried. */
+      const refusalNoteFor = (field) => {
+        if (refusal === null || !Array.isArray(refusal.keys) || !refusal.keys.includes(field.key)) return null
+        const pointed = refusal.named === field.key
+        return h('span', {
+          className: 'dsu-fieldError', key: 'refusal', role: 'alert',
+          'data-refused': field.key, 'data-pointed': pointed ? 'true' : 'false',
+        }, pointed
+          ? `出错位置：宿主点名了这个字段${refusal.reason === '' ? '' : '——' + refusal.reason}`
+          : '这次保存没有写入这个字段')
+      }
+
       const save = async () => {
         setStatus('保存中…')
         try {
@@ -409,20 +489,28 @@ window.__ModuleLoader__.load({
             try {
               response = await directMutate(ns, ops, revision)
             } catch (failure) {
-              setStatus('宿主拒绝了这次修改：' + (failure instanceof Error ? failure.message : String(failure)))
+              refuse('保存', ops, messageOf(failure))
               return
             }
             if (response !== null && typeof response === 'object' && response.ok === true) {
+              setRefusal(null)
               afterWrite(response.value)
               setStatus('已保存')
               return
             }
-            setStatus('宿主拒绝了这次修改：' + rejectionReason(response?.error))
+            refuse('保存', ops, rejectionReason(response?.error))
             return
           }
           const accepted = await form.mutate(ops, revision)
-          if (accepted) afterWrite(null)
-          setStatus(accepted ? '已保存' : '宿主拒绝了这次修改。')
+          if (accepted) {
+            setRefusal(null)
+            afterWrite(null)
+            setStatus('已保存')
+            return
+          }
+          // The shared form answers with a boolean only, so the page cannot tell
+          // why; it can still say which fields the write carried.
+          refuse('保存', ops, '')
         } catch (error) {
           setStatus(error instanceof Error ? error.message : String(error))
         }
@@ -460,19 +548,24 @@ window.__ModuleLoader__.load({
             try {
               response = await directMutate(ns, ops, revision)
             } catch (failure) {
-              setStatus('宿主拒绝了这次修改：' + messageOf(failure))
+              refuse('恢复默认', ops, messageOf(failure))
               return
             }
             if (response !== null && typeof response === 'object' && response.ok === true) {
+              setRefusal(null)
               finishReset(current, response.value)
               return
             }
-            setStatus('宿主拒绝了这次修改：' + rejectionReason(response?.error))
+            refuse('恢复默认', ops, rejectionReason(response?.error))
             return
           }
           const accepted = await form.mutate(ops, revision)
-          if (accepted) finishReset(current)
-          else setStatus('宿主拒绝了这次修改。')
+          if (accepted) {
+            setRefusal(null)
+            finishReset(current)
+            return
+          }
+          refuse('恢复默认', ops, '')
         } catch (error) {
           setStatus(messageOf(error))
         }
@@ -483,7 +576,7 @@ window.__ModuleLoader__.load({
           h('h4', { className: 'dsu-title', key: 'title' }, title),
           intro === undefined ? null : h('p', { className: 'dsu-hint', key: 'intro' }, intro),
         ]),
-        ...fields.map((field) => renderField(field, draft, readOnly, update, toggleOption, secretFlags)),
+        ...fields.map((field) => renderField(field, draft, readOnly, update, toggleOption, secretFlags, refusalNoteFor(field))),
         h('div', { className: 'dsu-actions', key: 'actions' }, [
           h('button', {
             className: 'dsu-save', key: 'save', type: 'button',
@@ -500,8 +593,16 @@ window.__ModuleLoader__.load({
       ])
     }
 
-    /** Render one field according to its kind. */
-    function renderField(field, draft, readOnly, update, toggleOption, secretFlags) {
+    /** Render one field plus the mark a refused write left under it. */
+    function renderField(field, draft, readOnly, update, toggleOption, secretFlags, refusalNote) {
+      const control = renderControl(field, draft, readOnly, update, toggleOption, secretFlags)
+      if (refusalNote === null || refusalNote === undefined) return control
+      const children = Array.isArray(control.props.children) ? control.props.children : [control.props.children]
+      return h(control.type, control.props, [...children, refusalNote])
+    }
+
+    /** Render one field control according to its kind. */
+    function renderControl(field, draft, readOnly, update, toggleOption, secretFlags) {
       const hint = field.hint === undefined ? null : h('span', { className: 'dsu-hint', key: 'hint' }, field.hint)
       if (field.kind === 'secret') {
         const configured = secretFlags?.[field.key]
@@ -815,11 +916,13 @@ window.__ModuleLoader__.load({
           const accepted = await persistSkills(next)
           if (accepted === false) {
             setDisabled(before)
-            setSaveError('宿主拒绝了这次修改，开关已还原。')
+            setSaveError(`技能「${skill.name}」的开关没有写入：宿主拒绝了这次修改，开关已还原。`
+              + '共享表单只回布尔值、没有原因；先看 dsh web 启动日志里 utils-agents 是否激活，重启后再试。')
           }
         } catch (failure) {
           setDisabled(before)
-          setSaveError('宿主拒绝了这次修改，开关已还原：' + (failure instanceof Error ? failure.message : String(failure)))
+          setSaveError(`技能「${skill.name}」的开关没有写入：宿主拒绝了这次修改，开关已还原。宿主原因：`
+            + messageOf(failure))
         } finally {
           setWriting('')
         }

@@ -697,11 +697,11 @@ name = "dsh-remote"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = 3079
-remotePort = 19079
+remotePort = 6040
 ```
 
-- `remotePort` 必须落在 frps 的 `allowPorts` 里（如 `allowPorts = [{ start = 19000, end = 19100 }]`），否则 frpc 登录成功但代理起不来；
-- 浏览器地址就是 `http://<frps 主机>:19079/`，因此 `publicUrl` 必须一字不差地填这个根地址；
+- `remotePort` 必须落在 frps 的 `allowPorts` 里（如 `allowPorts = [{ start = 6040, end = 6040 }]`），否则 frpc 登录成功、代理却报 `port not allowed` 并反复重试；示例里的 6040 只是占位，按你自己的放行区间改；
+- 浏览器地址就是 `http://<frps 主机>:6040/`，因此 `publicUrl` 必须一字不差地填这个根地址；
 - `tcp` 类型原样保留浏览器的 Host，代理本来就会改写，**不需要**动 DSH 的 `trustedHosts`。
 
 有域名和 TLS 时，让 frps 做 vhost（或在前置 Nginx/Caddy 终止 TLS）：
@@ -715,7 +715,7 @@ customDomains = ["dsh.example.com"]
 
 ```nginx
 location / {
-  proxy_pass http://127.0.0.1:19079;
+  proxy_pass http://127.0.0.1:6040;
   proxy_http_version 1.1;
   proxy_set_header Host $host;
   proxy_set_header Upgrade $http_upgrade;
@@ -750,7 +750,7 @@ location / {
 - 配置页：`plugins.row.config`，key 是 `@xi4z/dsh-utils#<行 id>`；utils-agents 一页含「递归技能发现 / 模型可见性 / 预设与技能仓库」三块，审批门控、QQ 审批卡片、通知与反向代理入口各一页。反向代理页可直接改监听端口、公网地址、界面策略与日志选项，保存即生效（`listenHost`/`listenPort` 需重启宿主）。每个配置区的「保存」旁有「恢复默认」：一次点击只对本区 `user` 层出现过的字段发 `unset`，回落到宿主的 base／默认值；本节没有用户覆盖时按钮置灰。技能列表超过 8 个默认折叠，避免把下面的配置区挤下去。
 - 右侧栏：`sidebar.right.pane.tab` 的 `utils-agents` 面板，路由全部由 `@xi4z/dsh-utils-utils-agents` 提供。
 - 两套 Deploy Key 的保存/清除、技能仓库配置、版本检查与自动安装都在这个面板里。
-- 保存失败会带回宿主的真实原因：页面直接调 `settings.mutate`，把 `settings/conflict`（并显示两端的 revision）、`settings/rejected` 等失败原文显示在保存按钮旁；技能开关的总线同样显示原因后再还原。写失败后条目被重载或 revision 变化时，刷新页面再保存即可。
+- 保存失败会指出「哪里出错」并带回宿主的真实原因：状态行先给区名（如「反向代理入口」）和这次保存涉及的字段；宿主消息点名字段时（schema 拒绝通常写成 `Config field "publicUrl" is not volatile`），该字段直接标成「出错位置」，并在字段下方显示红字标记。页面直接调 `settings.mutate`，`settings/conflict`（并显示两端的 revision）、`settings/rejected` 等失败原文照原样带出；走共享表单、宿主只回布尔值时没有原因可显示，页面改为提示检查该组件是否已在宿主里激活。技能开关同样先显示技能名与原因再还原。写失败后条目被重载或 revision 变化时，刷新页面再保存即可。
 
 停用 `utils-ui` 只失去界面与面板，五个宿主行继续工作。
 

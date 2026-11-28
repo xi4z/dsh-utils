@@ -169,7 +169,7 @@ function skillSwitch(tree, name) {
 
 // ------------------------------------------------------------- host doubles --
 
-function fakeForm(initialValue, { status = 'ready', writable = true, revision = 7, setResult = true, onSet, user, base } = {}) {
+function fakeForm(initialValue, { status = 'ready', writable = true, revision = 7, setResult = true, mutateResult = true, onSet, user, base } = {}) {
   const calls = []
   const writes = []
   const listeners = new Set()
@@ -195,6 +195,7 @@ function fakeForm(initialValue, { status = 'ready', writable = true, revision = 
     },
     mutate: async (ops, at) => {
       calls.push({ ops, revision: at })
+      if (mutateResult === false) return false
       value = { ...value }
       for (const op of ops) {
         if (op.op === 'unset') delete value[op.path[0]]
@@ -765,6 +766,64 @@ test('notify page: a typed token is written and the stored value is never restat
   await clickSave(tree)
 
   assert.deepEqual(notifyForm.calls[0].ops, [{ op: 'set', path: ['gotifyToken'], value: 'fresh-token' }])
+})
+
+test('notify page: a refused write names the section and the field the Host points at', async () => {
+  const remote = {
+    settings: {
+      describe: async () => ({ ok: true, value: { namespaces: [] } }),
+      mutate: async () => ({
+        ok: false,
+        error: {
+          code: 'settings/rejected',
+          message: 'Config field "gotifyPriority" is not volatile',
+          details: { ns: 'dsh-notify' },
+        },
+      }),
+    },
+  }
+  const { registrations } = await mountClient({ remote })
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-notify').component
+
+  let tree = render(createElement(page, {}))
+  fieldControl(tree, '默认优先级').props.onChange({ target: { value: '5' } })
+  tree = render(createElement(page, {}))
+  await clickSave(tree)
+  tree = render(createElement(page, {}))
+
+  const text = textOf(tree)
+  assert.match(text, /「会话通知」保存失败：宿主拒绝了这次修改/)
+  assert.match(text, /出错位置：字段「默认优先级」（gotifyPriority）/)
+  assert.match(text, /Config field "gotifyPriority" is not volatile/)
+
+  const [pointed] = collect(tree, (node) => node.props?.['data-refused'] === 'gotifyPriority')
+  assert.equal(pointed.props['data-pointed'], 'true', 'the named field is marked inline')
+  assert.match(textOf(pointed), /出错位置/)
+
+  // Editing a field clears the marks from the previous attempt.
+  fieldControl(tree, '默认优先级').props.onChange({ target: { value: '6' } })
+  tree = render(createElement(page, {}))
+  assert.equal(textOf(tree).includes('出错位置'), false)
+})
+
+test('configuration page: a refusal without a reason still names the fields and the activation hint', async () => {
+  const { registrations } = await mountClient({ notifyOptions: { mutateResult: false } })
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-notify').component
+
+  let tree = render(createElement(page, {}))
+  fieldControl(tree, '默认优先级').props.onChange({ target: { value: '5' } })
+  tree = render(createElement(page, {}))
+  await clickSave(tree)
+  tree = render(createElement(page, {}))
+
+  const text = textOf(tree)
+  assert.match(text, /「会话通知」保存失败：宿主拒绝了这次修改/)
+  assert.match(text, /涉及的字段：「默认优先级」（gotifyPriority）/)
+  assert.match(text, /dsh-notify 是否激活/)
+
+  const [marked] = collect(tree, (node) => node.props?.['data-refused'] === 'gotifyPriority')
+  assert.equal(marked.props['data-pointed'], 'false', 'no field is singled out without a reason')
+  assert.match(textOf(marked), /没有写入/)
 })
 
 // ----------------------------------------------------------------- skills --
