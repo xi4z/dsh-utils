@@ -663,7 +663,7 @@ DSH Web 有三道门，任意一道都会把远端挡在外面：
 | `bootstrapMaxPerMinute` | `6` | 每个来源每分钟的跳转预算，防止 cookie 被拒时来回跳 |
 | `logAuthCookie` | `true` | 把宿主刚签发的 `dsh-auth-*` cookie 回显到宿主日志 |
 
-`publicUrl`、`strategy`、`autoBootstrap`、`bootstrapMaxPerMinute`、`autoSignIn`、`signInMaxPerMinute` 是 volatile 字段，保存即生效；`listenHost`/`listenPort` 在激活时读取，改了要重启宿主。
+`publicUrl`、`strategy`、`autoBootstrap`、`bootstrapMaxPerMinute`、`autoSignIn`、`signInMaxPerMinute`、`logAuthCookie` 是 volatile 字段，保存即生效；`enabled`、`listenHost`、`listenPort`、`allowRemoteListen` 在激活时读取，改了要重启宿主。
 
 ### 直接端口自动登录
 
@@ -677,6 +677,55 @@ DSH Web 有三道门，任意一道都会把远端挡在外面：
 它只包裹 `authorizeIndex()`，不读凭据、不伪造 cookie：token 是否有效、cookie 怎么签、Host/Origin 栅栏都留在宿主原逻辑里。已经带 token 的请求直接交给宿主，token 无效时看到的就是宿主的 `401`，不会来回弹；浏览器不收 cookie 的情况由每分钟跳转预算兜底（默认 30 次），用尽后交回 `401` 并告警一次。
 
 它与代理的 `autoBootstrap` 是两套入口：那个在反代层接 401，这个在宿主索引层接 401，可以各自开关。
+
+### 嵌入视图（`?embed=1`）
+
+同一份宿主页面可以通过查询参数切成“无侧栏”的嵌入视图，供其他面板用 iframe 挂载：
+
+- `?embed=1`：注入一段样式与脚本，把布局压成单列，隐藏侧栏、工作区头，以及新建 / 搜索 / 添加工作区 / 账户等入口；
+- `?embed=1&session=<id>`：额外按会话 id 选中该行，确认 `aria-selected="true"` 后才隐藏侧栏；等不到或点不中时保留完整界面，不留下“侧栏没了但会话没打开”的半残态。
+
+注入只发生在带 `?embed=1` 的请求上，桌面自己的窗口直连宿主端口，不受影响；token 与 303 链路没有改动。三个已知限制：无 cookie 首次经 303 进来时可能落到完整界面（先访问一次 `/` 拿到 cookie 再嵌）；选中依赖客户端 DOM（工作区树 `data-row-key="workspace:…"`、会话行 `data-row-key="session:session-<id>"`，要点行内的 `.title`），客户端改版可能失效；公网域名前置 SSO（如 Casdoor）时 iframe 无法登录，嵌入应走回环或内网地址。
+
+### 用 frp 接入（沿用现有 frps）
+
+假设 frps 已经在跑，PC 上的 frpc 已经给别的服务做穿透，只需在同一个 `frpc.toml` 里加一段代理：
+
+```toml
+[[proxies]]
+name = "dsh-remote"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 3079
+remotePort = 19079
+```
+
+- `remotePort` 必须落在 frps 的 `allowPorts` 里（如 `allowPorts = [{ start = 19000, end = 19100 }]`），否则 frpc 登录成功但代理起不来；
+- 浏览器地址就是 `http://<frps 主机>:19079/`，因此 `publicUrl` 必须一字不差地填这个根地址；
+- `tcp` 类型原样保留浏览器的 Host，代理本来就会改写，**不需要**动 DSH 的 `trustedHosts`。
+
+有域名和 TLS 时，让 frps 做 vhost（或在前置 Nginx/Caddy 终止 TLS）：
+
+```toml
+[[proxies]]
+name = "dsh-remote"
+type = "https"
+customDomains = ["dsh.example.com"]
+```
+
+```nginx
+location / {
+  proxy_pass http://127.0.0.1:19079;
+  proxy_http_version 1.1;
+  proxy_set_header Host $host;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_read_timeout 3600s;
+  client_max_body_size 300m;
+}
+```
+
+此时 `publicUrl` 填 `https://dsh.example.com/`。三个容易漏的点：WebSocket 必须通（否则界面打开后一直“重连中”）、请求体上限 ≥ 300 MiB（图片上行）、以及前面若还有一层自己的鉴权，确保 302 与 `Set-Cookie` 能穿过它。
 
 ### 安全边界
 
@@ -698,7 +747,7 @@ DSH Web 有三道门，任意一道都会把远端挡在外面：
 
 宿主半侧只有一个空 `apply()`，`client.js` 提供全部界面。`packages/ui/package.json` 声明 `dsh.client` 并导出 `./client`；patch 的 `utils-ui` 行挂裸包名，DSH 的客户端扫描器因此把 `client.js` 挂在这一行。五个宿主行不声明 `dsh.client`。
 
-- 配置页：`plugins.row.config`，key 是 `@xi4z/dsh-utils#<行 id>`；utils-agents 一页含「递归技能发现 / 模型可见性 / 预设与技能仓库」三块，审批门控、QQ 审批卡片与通知各一页。每个配置区的「保存」旁有「恢复默认」：一次点击只对本区 `user` 层出现过的字段发 `unset`，回落到宿主的 base／默认值；本节没有用户覆盖时按钮置灰。技能列表超过 8 个默认折叠，避免把下面的配置区挤下去。
+- 配置页：`plugins.row.config`，key 是 `@xi4z/dsh-utils#<行 id>`；utils-agents 一页含「递归技能发现 / 模型可见性 / 预设与技能仓库」三块，审批门控、QQ 审批卡片、通知与反向代理入口各一页。反向代理页可直接改监听端口、公网地址、界面策略与日志选项，保存即生效（`listenHost`/`listenPort` 需重启宿主）。每个配置区的「保存」旁有「恢复默认」：一次点击只对本区 `user` 层出现过的字段发 `unset`，回落到宿主的 base／默认值；本节没有用户覆盖时按钮置灰。技能列表超过 8 个默认折叠，避免把下面的配置区挤下去。
 - 右侧栏：`sidebar.right.pane.tab` 的 `utils-agents` 面板，路由全部由 `@xi4z/dsh-utils-utils-agents` 提供。
 - 两套 Deploy Key 的保存/清除、技能仓库配置、版本检查与自动安装都在这个面板里。
 - 保存失败会带回宿主的真实原因：页面直接调 `settings.mutate`，把 `settings/conflict`（并显示两端的 revision）、`settings/rejected` 等失败原文显示在保存按钮旁；技能开关的总线同样显示原因后再还原。写失败后条目被重载或 revision 变化时，刷新页面再保存即可。

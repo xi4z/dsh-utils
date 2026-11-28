@@ -235,7 +235,7 @@ const NOTIFY_VALUE = {
   approvalTemplate: '',
 }
 
-function fakeCtx({ served = ['dsh-approval-policy', 'dsh-notify', 'utils-agents'], agentsValue, approvalValue, notifyValue, agentsOptions, approvalOptions, notifyOptions, skillOptions, panelOptions, workbenchOptions, remote } = {}) {
+function fakeCtx({ served = ['dsh-approval-policy', 'dsh-notify', 'dsh-remote', 'utils-agents'], agentsValue, approvalValue, notifyValue, remoteValue, agentsOptions, approvalOptions, notifyOptions, remoteOptions, skillOptions, panelOptions, workbenchOptions, remote } = {}) {
   const agentsForm = fakeForm(agentsValue ?? {
     minDepth: 1,
     maxDepth: 8,
@@ -265,6 +265,19 @@ function fakeCtx({ served = ['dsh-approval-policy', 'dsh-notify', 'utils-agents'
     autoReviewContent: true,
   }, approvalOptions)
   const notifyForm = fakeForm(notifyValue === undefined ? { ...NOTIFY_VALUE } : notifyValue, notifyOptions)
+  const remoteForm = fakeForm(remoteValue ?? {
+    enabled: false,
+    listenHost: '127.0.0.1',
+    listenPort: 3079,
+    publicUrl: '',
+    strategy: 'auto',
+    autoBootstrap: true,
+    autoSignIn: true,
+    signInMaxPerMinute: 30,
+    allowRemoteListen: false,
+    bootstrapMaxPerMinute: 6,
+    logAuthCookie: true,
+  }, remoteOptions)
   const registrations = []
   const tabTypes = []
   const effects = []
@@ -274,6 +287,7 @@ function fakeCtx({ served = ['dsh-approval-policy', 'dsh-notify', 'utils-agents'
       get: (namespace) => {
         if (namespace === 'utils-agents') return agentsForm
         if (namespace === 'dsh-notify') return notifyForm
+        if (namespace === 'dsh-remote') return remoteForm
         return approvalForm
       },
       whileServed: (namespaces, register) => {
@@ -305,7 +319,7 @@ function fakeCtx({ served = ['dsh-approval-policy', 'dsh-notify', 'utils-agents'
     },
   }
   // The former skills / skill-panel / utils-agents forms are one namespace now.
-  return { ctx, agentsForm, skillForm: agentsForm, panelForm: agentsForm, workbenchForm: agentsForm, approvalForm, notifyForm, registrations, tabTypes, effects }
+  return { ctx, agentsForm, skillForm: agentsForm, panelForm: agentsForm, workbenchForm: agentsForm, approvalForm, notifyForm, remoteForm, registrations, tabTypes, effects }
 }
 /** Load the browser half and mount it against the fake host. */
 async function mountClient(options) {
@@ -348,8 +362,30 @@ test('the client half registers one configuration page per mounted row', async (
   assert.deepEqual(keys, [
     'plugins.row.config:@xi4z/dsh-utils#dsh-approval-policy',
     'plugins.row.config:@xi4z/dsh-utils#dsh-notify',
+    'plugins.row.config:@xi4z/dsh-utils#dsh-remote',
     'plugins.row.config:@xi4z/dsh-utils#utils-agents',
   ])
+})
+
+test('remote page: fixed listen port, public URL and the tunnel switches are editable', async () => {
+  const { registrations, remoteForm } = await mountClient()
+  const page = registrations.find(({ options }) => options.key === '@xi4z/dsh-utils#dsh-remote').component
+
+  let tree = render(createElement(page, {}))
+  assert.equal(textOf(tree).includes('反向代理入口'), true)
+  assert.equal(fieldControl(tree, '本机监听端口').props.value, '3079')
+  assert.equal(fieldControl(tree, '监听地址').props.value, '127.0.0.1')
+  assert.equal(fieldControl(tree, '公网地址').props.value, '')
+  assert.equal(fieldControl(tree, '界面策略').props.value, 'auto')
+  assert.equal(checkbox(tree, '直接端口自动登录').props.checked, true)
+
+  const toggle = checkbox(tree, '启用反向代理')
+  toggle.props.onChange({ target: { checked: true } })
+  tree = render(createElement(page, {}))
+  await clickSave(tree)
+  assert.equal(remoteForm.calls.length, 1)
+  assert.deepEqual(remoteForm.calls[0].ops, [{ op: 'set', path: ['enabled'], value: true }])
+  assert.equal(remoteForm.calls[0].revision, 7)
 })
 
 test('registration follows the namespaces the Host serves', async () => {

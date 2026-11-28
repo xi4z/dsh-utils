@@ -57,7 +57,7 @@ export interface RemoteConfig {
  * The listener address is read once at activation — changing it needs a reload.
  */
 export declare const Config: z<Schemastery.ObjectS<NoInfer<{
-    enabled: z<boolean, boolean, "volatile-defined">;
+    enabled: z<boolean, boolean, "defined">;
     listenHost: z<string, string, "defined">;
     listenPort: z<number, number, "defined">;
     publicUrl: z<string, string, "volatile-defined">;
@@ -69,7 +69,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     autoSignIn: z<boolean, boolean, "volatile-defined">;
     signInMaxPerMinute: z<number, number, "volatile-defined">;
 }>>, Schemastery.ObjectT<NoInfer<{
-    enabled: z<boolean, boolean, "volatile-defined">;
+    enabled: z<boolean, boolean, "defined">;
     listenHost: z<string, string, "defined">;
     listenPort: z<number, number, "defined">;
     publicUrl: z<string, string, "volatile-defined">;

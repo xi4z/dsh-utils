@@ -29,6 +29,7 @@ import { createServer, request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import type { IncomingHttpHeaders, IncomingMessage, OutgoingHttpHeaders, Server, ServerResponse } from 'node:http'
 import type { Socket } from 'node:net'
+import { injectEmbed, parseEmbed } from './embed.js'
 
 /** Where the proxied requests go: the loopback Harness listener. */
 export interface Upstream {
@@ -355,12 +356,15 @@ export function createProxy(options: ProxyOptions): ProxyHandle {
     }
     const upstreamBase = baseOf(upstream)
     const transport = upstream.protocol === 'https:' ? httpsRequest : httpRequest
+    const embed = parseEmbed(url.search)
+    const requestHeaders = rewriteRequestHeaders(request.headers, upstream)
+    if (embed !== undefined) delete requestHeaders['accept-encoding']
     const outgoing = transport({
       host: upstream.host,
       port: upstream.port,
       method: request.method,
       path: request.url,
-      headers: rewriteRequestHeaders(request.headers, upstream),
+      headers: requestHeaders,
       agent: false,
     })
 
@@ -386,6 +390,19 @@ export function createProxy(options: ProxyOptions): ProxyHandle {
         upstreamResponse.resume()
         response.writeHead(302, { location, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' })
         response.end()
+        return
+      }
+      if (embed !== undefined && String(upstreamResponse.headers['content-type'] ?? '').startsWith('text/html')) {
+        const chunks: Buffer[] = []
+        upstreamResponse.on('data', (chunk: Buffer) => chunks.push(chunk))
+        upstreamResponse.on('end', () => {
+          const body = Buffer.from(injectEmbed(Buffer.concat(chunks).toString('utf8'), embed.session), 'utf8')
+          delete headers['content-encoding']
+          headers['content-length'] = String(body.length)
+          stats.proxied += 1
+          response.writeHead(upstreamResponse.statusCode ?? 200, upstreamResponse.statusMessage, headers)
+          response.end(body)
+        })
         return
       }
       stats.proxied += 1

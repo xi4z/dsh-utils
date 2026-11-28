@@ -3,4 +3,5 @@ node_modules/
 
 # 仅本地的开发约定，不提交、不发布
 DEVELOP.md
+HANDOFF.md
 

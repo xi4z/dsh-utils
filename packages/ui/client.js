@@ -20,6 +20,7 @@ window.__ModuleLoader__.load({
     const BUNDLE = '@xi4z/dsh-utils'
     const APPROVAL_NS = 'dsh-approval-policy'
     const NOTIFY_NS = 'dsh-notify'
+    const REMOTE_NS = 'dsh-remote'
     const AGENTS_NS = 'utils-agents'
     const WB_TAB = 'utils-agents'
     const ORIGINS = [
@@ -93,6 +94,28 @@ window.__ModuleLoader__.load({
       { key: 'template', label: '会话结束模板', kind: 'textarea', hint: '占位符：{status} {kind} {sessionId} {cwd} {reply} {error} {device} {host} {date} {time}；空行删整行，留空用内置默认。' },
       { key: 'questionTemplate', label: '提问模板', kind: 'textarea', hint: '额外可用 {question} {detail} {options}。' },
       { key: 'approvalTemplate', label: '授权模板', kind: 'textarea', hint: '额外可用 {tool} {reason}。' },
+    ]
+
+    const REMOTE_FIELDS = [
+      { key: 'enabled', label: '启用反向代理', kind: 'boolean', hint: '在本机回环端口起代理，隧道转发到这里；默认关闭，改完要重启宿主（「直接端口自动登录」不受它影响）。' },
+      { key: 'listenHost', label: '监听地址', kind: 'text', hint: '默认 127.0.0.1；非回环地址必须同时打开「允许非回环监听」。改了要重启宿主。' },
+      { key: 'listenPort', label: '本机监听端口', kind: 'number', min: 1, max: 65535, hint: '隧道转发到这个固定端口。Desktop 的上游端口每次启动随机，代理逐请求跟随，不受影响。' },
+      { key: 'publicUrl', label: '公网地址', kind: 'text', hint: '浏览器实际打开的 http(s) 根地址，如 https://dsh.example.com/。首次登录会跳到宿主为它签发的 token 地址，必须与这里完全一致。' },
+      {
+        key: 'strategy', label: '界面策略', kind: 'select',
+        options: [
+          ['auto', '自动（desktop 保留原界面 / web 直通）'],
+          ['preserve-desktop-ui', '保留桌面 UI 并自举鉴权'],
+          ['passthrough', '纯转发，不跳转'],
+        ],
+        hint: 'auto 按 profile 判定：desktop 用 preserve-desktop-ui，web 用 passthrough。',
+      },
+      { key: 'autoBootstrap', label: '自动引导首次登录（隧道）', kind: 'boolean', hint: '经代理进来的首页 401 时跳一次到宿主签发的 token 地址；关掉就只能用启动行打印的地址。' },
+      { key: 'autoSignIn', label: '直接端口自动登录', kind: 'boolean', hint: '不走隧道、直接打开宿主端口（如 127.0.0.1:3080）时，用宿主自己的 launch token 换 cookie；与上面总开关无关。' },
+      { key: 'signInMaxPerMinute', label: '直接端口跳转上限', kind: 'number', min: 1, max: 600, hint: '浏览器拒收 cookie 时的兜底预算，每分钟每个来源。' },
+      { key: 'allowRemoteListen', label: '允许非回环监听', kind: 'boolean', hint: '代理会改写 Host/Origin 栅栏，所以默认只监听回环；只在隧道拨不到回环时才打开。' },
+      { key: 'bootstrapMaxPerMinute', label: '每分钟跳转上限', kind: 'number', min: 1, max: 120, hint: '每个来源每分钟最多引导几次，防止 cookie 被拒时来回跳。' },
+      { key: 'logAuthCookie', label: '日志回显 cookie', kind: 'boolean', hint: '把宿主刚签发的 dsh-auth-* 写进宿主日志；那是一枚可用的会话凭据，排障后建议关掉。' },
     ]
 
     const AGENTS_FIELDS = [
@@ -2486,6 +2509,7 @@ window.__ModuleLoader__.load({
       })()
       const approvalForm = ctx.configForms.get(APPROVAL_NS)
       const notifyForm = ctx.configForms.get(NOTIFY_NS)
+      const remoteForm = ctx.configForms.get(REMOTE_NS)
       let agentsForm = null
       try {
         agentsForm = ctx.configForms.get(AGENTS_NS) || null
@@ -2495,6 +2519,7 @@ window.__ModuleLoader__.load({
       ctx.effect(() => () => {
         approvalForm.dispose()
         notifyForm.dispose()
+        remoteForm.dispose()
         if (agentsForm) agentsForm.dispose()
       }, 'dsh-utils: configuration forms')
       const ApprovalRowPage = RowPage({
@@ -2506,6 +2531,11 @@ window.__ModuleLoader__.load({
         form: notifyForm, fields: NOTIFY_FIELDS, ns: NOTIFY_NS, directMutate, describeSecrets,
         title: '会话通知',
         intro: '会话结束、等待回答或等待授权时推送一条消息；出口是 Gotify 网关，多台设备共用一个 QQ 也能分清是谁。',
+      })
+      const RemoteRowPage = RowPage({
+        form: remoteForm, fields: REMOTE_FIELDS, ns: REMOTE_NS, directMutate, describeSecrets,
+        title: '反向代理入口',
+        intro: '给自备隧道一个固定的本机入口：改写 Host/Origin 后转发给 DSH Web；desktop 保留原版界面并自动引导首次登录。宿主自己端口上的 401 由「直接端口自动登录」处理，与代理开关无关。状态见 http://127.0.0.1:<本机监听端口>/_dsh_utils_remote/status（仅本机可读）。',
       })
       // The merged utils-agents row page carries the former recursive-discovery,
       // skill-panel and preset pages: one config form, three sections.
@@ -2553,7 +2583,7 @@ window.__ModuleLoader__.load({
 
       // Each component owns one page, keyed the way the Plugins page addresses a
       // row's configuration: `${bundle}#${rowId}`.
-      ctx.effect(() => ctx.configForms.whileServed([APPROVAL_NS, NOTIFY_NS, AGENTS_NS], (served) => {
+      ctx.effect(() => ctx.configForms.whileServed([APPROVAL_NS, NOTIFY_NS, REMOTE_NS, AGENTS_NS], (served) => {
         const offs = []
         if (served.has(APPROVAL_NS)) {
           offs.push(ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
@@ -2564,6 +2594,11 @@ window.__ModuleLoader__.load({
           offs.push(ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
             name: 'plugins.row.config', key: `${BUNDLE}#${NOTIFY_NS}`,
           }, NotifyRowPage)))
+        }
+        if (served.has(REMOTE_NS)) {
+          offs.push(ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
+            name: 'plugins.row.config', key: `${BUNDLE}#${REMOTE_NS}`,
+          }, RemoteRowPage)))
         }
         if (served.has(AGENTS_NS) && AgentsRowPage !== null) {
           offs.push(ctx.slots.inject('plugins.row.config', () => ctx.slots.register({

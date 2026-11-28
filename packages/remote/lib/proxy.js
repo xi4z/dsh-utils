@@ -26,6 +26,7 @@
  */
 import { createServer, request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
+import { injectEmbed, parseEmbed } from './embed.js';
 /** Loopback-only introspection route on the proxy's own port. */
 export const STATUS_PATH = '/_dsh_utils_remote/status';
 /** One bootstrap window per peer, in milliseconds. */
@@ -295,12 +296,16 @@ export function createProxy(options) {
         }
         const upstreamBase = baseOf(upstream);
         const transport = upstream.protocol === 'https:' ? httpsRequest : httpRequest;
+        const embed = parseEmbed(url.search);
+        const requestHeaders = rewriteRequestHeaders(request.headers, upstream);
+        if (embed !== undefined)
+            delete requestHeaders['accept-encoding'];
         const outgoing = transport({
             host: upstream.host,
             port: upstream.port,
             method: request.method,
             path: request.url,
-            headers: rewriteRequestHeaders(request.headers, upstream),
+            headers: requestHeaders,
             agent: false,
         });
         outgoing.on('response', (upstreamResponse) => {
@@ -325,6 +330,19 @@ export function createProxy(options) {
                 upstreamResponse.resume();
                 response.writeHead(302, { location, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
                 response.end();
+                return;
+            }
+            if (embed !== undefined && String(upstreamResponse.headers['content-type'] ?? '').startsWith('text/html')) {
+                const chunks = [];
+                upstreamResponse.on('data', (chunk) => chunks.push(chunk));
+                upstreamResponse.on('end', () => {
+                    const body = Buffer.from(injectEmbed(Buffer.concat(chunks).toString('utf8'), embed.session), 'utf8');
+                    delete headers['content-encoding'];
+                    headers['content-length'] = String(body.length);
+                    stats.proxied += 1;
+                    response.writeHead(upstreamResponse.statusCode ?? 200, upstreamResponse.statusMessage, headers);
+                    response.end(body);
+                });
                 return;
             }
             stats.proxied += 1;

@@ -54,8 +54,7 @@ const DEFAULTS = {
  */
 export const Config = z.object({
     enabled: z.boolean().default(DEFAULTS.enabled)
-        .description('Start the loopback proxy. Off by default; turn it on together with your tunnel.')
-        .volatile(),
+        .description('Start the loopback proxy at activation. Off by default; changing it takes a Host restart.'),
     listenHost: z.string().default(DEFAULTS.listenHost)
         .description('Listen address of the proxy. Loopback only unless allowRemoteListen is set.'),
     listenPort: z.natural().min(1).max(65535).default(DEFAULTS.listenPort)
